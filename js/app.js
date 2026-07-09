@@ -713,6 +713,7 @@ function normalizePaper(paper, date) {
   
   return {
     title: paper.title || '',
+    translated_title: paper.AI && paper.AI.translated_title ? paper.AI.translated_title : '',
     url: paper.url || paper.abs || paper.pdf || `https://arxiv.org/abs/${paper.id}`,
     authors: Array.isArray(paper.authors) ? paper.authors.join(', ') : (paper.authors || ''),
     category: allCategories,
@@ -1292,7 +1293,10 @@ function renderPapers() {
       <div class="paper-card-index">${index + 1}</div>
       ${paper.isMatched ? '<div class="match-badge" title="匹配您的搜索条件"></div>' : ''}
       <div class="paper-card-header">
-        <h3 class="paper-card-title">${highlightedTitle}</h3>
+        <h3 class="paper-card-title">
+          ${highlightedTitle}
+          ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${paper.translated_title}</div>` : ''}
+        </h3>
         <p class="paper-card-authors">${formattedAuthors}</p>
         <div class="paper-card-categories">
           ${categoryTags}
@@ -1339,7 +1343,11 @@ function showPaperDetails(paper, paperIndex) {
     : paper.title;
   
   // 在标题前添加索引号
-  modalTitle.innerHTML = paperIndex ? `<span class="paper-index-badge">${paperIndex}</span> ${highlightedTitle}` : highlightedTitle;
+  let titleHtml = highlightedTitle;
+  if (paper.translated_title && paper.translated_title !== paper.title) {
+    titleHtml += `<div class="paper-modal-title-zh">${paper.translated_title}</div>`;
+  }
+  modalTitle.innerHTML = paperIndex ? `<span class="paper-index-badge">${paperIndex}</span> ${titleHtml}` : titleHtml;
   
   const abstractText = paper.details || '';
   

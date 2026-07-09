@@ -40,6 +40,7 @@ def test_static_files():
 def test_auth_and_data_apis():
     # Configure fake password
     import server
+    old_password = server.ACCESS_PASSWORD
     server.ACCESS_PASSWORD = "testpassword"
     
     # Unauthenticated access should fail
@@ -67,7 +68,16 @@ def test_auth_and_data_apis():
     os.makedirs("data", exist_ok=True)
     test_file = "data/2026-07-09_AI_enhanced_Chinese.jsonl"
     with open(test_file, "w") as f:
-        f.write(json.dumps({"title": "Test Paper", "authors": ["Author 1"], "categories": ["cs.CV"], "AI": {"tldr": "Tldr"}}) + "\n")
+        f.write(json.dumps({
+            "id": "123",
+            "title": "Test Paper", 
+            "authors": ["Author 1"], 
+            "categories": ["cs.CV"], 
+            "AI": {
+                "translated_title": "测试论文标题",
+                "tldr": "Tldr"
+            }
+        }) + "\n")
     
     try:
         # Get dates
@@ -80,6 +90,7 @@ def test_auth_and_data_apis():
         assert response.status_code == 200
         assert len(response.json()) == 1
         assert response.json()[0]["title"] == "Test Paper"
+        assert response.json()[0]["AI"]["translated_title"] == "测试论文标题"
 
         # Invalid date format should return 400
         response = client.get("/api/papers?date=2026/07/09&lang=Chinese", headers=headers)
@@ -92,4 +103,4 @@ def test_auth_and_data_apis():
         if os.path.exists(test_file):
             os.remove(test_file)
         # Restore ACCESS_PASSWORD
-        server.ACCESS_PASSWORD = ""
+        server.ACCESS_PASSWORD = old_password

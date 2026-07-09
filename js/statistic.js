@@ -183,6 +183,7 @@ function normalizePaper(paper, date) {
   
   return {
     title: paper.title || '',
+    translated_title: paper.AI && paper.AI.translated_title ? paper.AI.translated_title : '',
     url: paper.url || paper.abs || paper.pdf || `https://arxiv.org/abs/${paper.id}`,
     authors: Array.isArray(paper.authors) ? paper.authors.join(', ') : (paper.authors || ''),
     category: allCategories,
@@ -959,7 +960,10 @@ function showRelatedPapers(keyword) {
     const papersHTML = relatedPapers.map((paper, index) => `
         <div class="paper-card">
             <div class="paper-number">${index + 1}</div>
-            <a href="${paper.url}" target="_blank" class="paper-title">${paper.title}</a>
+            <a href="${paper.url}" target="_blank" class="paper-title">
+                ${paper.title}
+                ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${paper.translated_title}</div>` : ''}
+            </a>
             <div class="paper-authors">${paper.authors}</div>
             <div class="paper-categories">
                 ${paper.category.map(cat => `<span class="category-tag">${cat}</span>`).join('')}
