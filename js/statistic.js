@@ -166,6 +166,8 @@ function selectLanguageForDate(date, preferredLanguage = null) {
     return preferred;
   }
   
+  // NOTE: The statistics page must prefer loading the English version of data where possible,
+  // because the 'compromise' NLP library used for keyword extraction only supports English taggers.
   // Fallback: prefer English/en if available, otherwise use the first available
   if (availableLanguages.includes('en')) return 'en';
   if (availableLanguages.includes('English')) return 'English';
