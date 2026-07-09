@@ -1,0 +1,41 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments & dependency caches
+.venv/
+.uv_cache/
+.uv_python/
+.pytest_cache/
+
+# Editor and IDE configurations
+.vscode/
+.idea/
+.DS_Store
+.cursorrules
+.agents/
+docs/
+.superpowers/
+
+# Environment variables & secrets
+.env
+ai/.env
+
+# Node & Package Manager (If any)
+node_modules/
+package-lock.json
+yarn.lock
+package.json
+
+# Local Crawled and processed Data
+# Exclude data folder content but keep the folder structure via .gitkeep
+data/*
+!data/.gitkeep
+
+# Server logs and runtime process files
+server.log
+.server.pid
