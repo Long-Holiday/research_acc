@@ -9,8 +9,9 @@ echo "=== 本地调试环境检查 / Local Debug Environment Check ==="
 if [ -z "$TOKEN_GITHUB" ]; then
     echo "⚠️  提示：未设置 TOKEN_GITHUB / Warning: TOKEN_GITHUB not set"
     echo "可能导致 GitHub 相关功能受限 / May limit GitHub related functionalities"
-fi
+else
     echo "✅ TOKEN_GITHUB 已设置 / TOKEN_GITHUB is set"
+fi
 
 # 检查必需的环境变量 / Check required environment variables
 if [ -z "$OPENAI_API_KEY" ]; then
