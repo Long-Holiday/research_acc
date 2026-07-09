@@ -195,7 +195,8 @@ function normalizePaper(paper, date) {
     remote_sensing_cross: paper.AI && paper.AI.remote_sensing_cross ? paper.AI.remote_sensing_cross : '',
     code_url: paper.code_url || '',
     code_stars: paper.code_stars || 0,
-    code_last_update: paper.code_last_update || ''
+    code_last_update: paper.code_last_update || '',
+    abstract_zh: paper.abstract_zh || ''
   };
 }
 
