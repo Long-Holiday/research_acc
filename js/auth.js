@@ -6,10 +6,24 @@
  * @module Auth
  */
 
-const Auth = {
-    // Cache for isPasswordEnabled check result
-    _passwordEnabled: undefined,
+let passwordEnabled = true;
+if (typeof XMLHttpRequest !== 'undefined') {
+    try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/auth/login', false); // Sync request
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(JSON.stringify({ password: "" }));
+        if (xhr.status === 200) {
+            passwordEnabled = false; // Empty password login succeeded, so no password is required
+        } else {
+            passwordEnabled = true;
+        }
+    } catch (e) {
+        console.warn("Failed to check password protection status, defaulting to enabled", e);
+    }
+}
 
+const Auth = {
     /**
      * Helper function to call API with Auth token injection & 401 handling.
      *
@@ -19,18 +33,25 @@ const Auth = {
      */
     async fetchWithAuth(url, options = {}) {
         const token = localStorage.getItem('arxiv_auth_token');
-        options.headers = options.headers || {};
         
-        if (token) {
-            if (options.headers instanceof Headers) {
-                options.headers.set('Authorization', `Bearer ${token}`);
-            } else if (typeof options.headers.set === 'function') {
-                options.headers.set('Authorization', `Bearer ${token}`);
-            } else {
-                options.headers['Authorization'] = `Bearer ${token}`;
+        if (url instanceof Request) {
+            if (token) {
+                url.headers.set('Authorization', `Bearer ${token}`);
             }
+        } else {
+            let headers = options.headers || {};
+            if (token) {
+                if (headers instanceof Headers) {
+                    headers.set('Authorization', `Bearer ${token}`);
+                } else if (Array.isArray(headers)) {
+                    headers.push(['Authorization', `Bearer ${token}`]);
+                } else {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+            }
+            options.headers = headers;
         }
-        
+
         const response = await fetch(url, options);
         if (response.status === 401) {
             localStorage.removeItem('arxiv_auth_token');
@@ -47,7 +68,7 @@ const Auth = {
      * Authenticate user with password using the backend API.
      *
      * @param {string} password - User input password
-     * @param {boolean} [remember=true] - Whether to remember login (currently token expire is set by backend)
+     * @param {boolean} [remember=true] - Whether to remember login
      * @returns {Promise<boolean>} True if authentication successful
      */
     async login(password, remember = true) {
@@ -103,34 +124,19 @@ const Auth = {
 
     /**
      * Check if password protection is enabled on the backend.
-     * Caches the result to avoid repeated network requests.
      *
-     * @returns {Promise<boolean>} True if password is required
+     * @returns {boolean} True if password is required
      */
-    async isPasswordEnabled() {
-        if (this._passwordEnabled !== undefined) {
-            return this._passwordEnabled;
-        }
-        try {
-            const response = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: "" })
-            });
-            this._passwordEnabled = response.status !== 200; // If empty password succeeds, then password is not required
-            return this._passwordEnabled;
-        } catch(e) {
-            return true;
-        }
+    isPasswordEnabled() {
+        return passwordEnabled;
     },
 
     /**
      * Require authentication (call on protected pages).
      * Redirects to login page if not authenticated.
      */
-    async requireAuth() {
-        const enabled = await this.isPasswordEnabled();
-        if (!enabled) {
+    requireAuth() {
+        if (!this.isPasswordEnabled()) {
             return;
         }
         if (!this.isAuthenticated()) {
@@ -184,4 +190,6 @@ const Auth = {
 };
 
 // Expose fetchWithAuth globally as well for convenience
-window.fetchWithAuth = Auth.fetchWithAuth.bind(Auth);
+if (typeof window !== 'undefined') {
+    window.fetchWithAuth = Auth.fetchWithAuth.bind(Auth);
+}
