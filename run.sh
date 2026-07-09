@@ -1,8 +1,14 @@
 #!/bin/bash
 
 # 本地测试脚本 / Local testing script
-# 主要工作流已迁移到 GitHub Actions (.github/workflows/run.yml)
-# Main workflow has been migrated to GitHub Actions (.github/workflows/run.yml)
+# 主要工作流由系统级 cron 调度或本地手动执行
+# Main workflow is scheduled by system-level cron or executed locally
+
+# 加载 .env 配置文件 / Load .env configuration
+if [ -f .env ]; then
+    echo "加载 .env 配置文件... / Loading .env configuration..."
+    export $(grep -v '^#' .env | xargs)
+fi
 
 # 环境变量检查和提示 / Environment variables check and prompt
 echo "=== 本地调试环境检查 / Local Debug Environment Check ==="
@@ -81,7 +87,7 @@ else
     echo "📝 今日文件不存在，准备新建... / Today's file doesn't exist, ready to create new one..."
 fi
 
-cd daily_arxiv
+cd daily_paper
 scrapy crawl arxiv -o ../data/${today}.jsonl
 
 if [ ! -f "../data/${today}.jsonl" ]; then
@@ -95,7 +101,7 @@ python crawl_openalex.py --date ${today} --output ../data/${today}.jsonl
 
 # 第二步：检查去重 / Step 2: Check duplicates  
 echo "步骤2：执行去重检查... / Step 2: Performing intelligent deduplication check..."
-python daily_arxiv/check_stats.py
+python daily_arxiv/check_stats.py --date "${today}"
 dedup_exit_code=$?
 
 case $dedup_exit_code in

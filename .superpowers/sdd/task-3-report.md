@@ -1,48 +1,82 @@
-# Task 3 Report: Backend Authentication & Paper REST APIs
+# Task 3 Report: Normalise translated_title and Render Bilingual Titles in JS
 
-## What I Implemented
-1. **Authentication Endpoints**:
-   - `POST /api/auth/login`: Handles password-based authentication. If `ACCESS_PASSWORD` is configured, it verifies the password and returns a session UUID with a 7-day expiration. If not configured, it returns an anonymous token.
-   - `POST /api/auth/check`: Verifies the validity of the provided Bearer token against active memory sessions.
-2. **Protected REST APIs**:
-   - `GET /api/dates`: Dynamically scans the `data/` directory and returns a sorted list of dates and a mapping of dates to available languages (extracted from `YYYY-MM-DD_AI_enhanced_{lang}.jsonl` filenames).
-   - `GET /api/papers`: Reads and parses the requested date/language `.jsonl` paper files on-the-fly and returns a JSON list of enhanced paper summaries.
+## What Was Implemented
 
-## What I Tested & Test Results
-- Added comprehensive unit tests in `tests/test_server.py` covering:
-  - Unauthenticated access prevention (returning 401).
-  - Invalid password login failure (returning 401).
-  - Valid password login success (returning 200 with session token).
-  - Validation of session checking with Bearer token.
-  - Dynamically scanning the folder structure and validating the date and language lists returned by `/api/dates`.
-  - Simulating `.jsonl` data reading and verifying the payload structure returned by `/api/papers`.
-- All tests were executed in the virtual environment via `PYTHONPATH=. .venv/bin/pytest tests/test_server.py -v`.
-- Test execution output:
-  ```
-  tests/test_server.py::test_index_page PASSED
-  tests/test_server.py::test_login_page PASSED
-  tests/test_server.py::test_settings_page PASSED
-  tests/test_server.py::test_statistic_page PASSED
-  tests/test_server.py::test_static_files PASSED
-  tests/test_server.py::test_auth_and_data_apis PASSED
-  ```
+1. **FastAPI Integration Test & Mock Update**:
+   - Modified `tests/test_server.py` to write a mock paper that contains a nested `translated_title` inside the `AI` key.
+   - Added an assertion checking that the retrieved paper response from the `/api/papers` endpoint preserves the `translated_title` property in the `AI` schema.
+
+2. **JavaScript Normalize Logic**:
+   - Updated `normalizePaper` in [js/app.js](file:///home/default_user/research_acc/js/app.js) to extract `translated_title` from `paper.AI.translated_title` and default it to an empty string if missing.
+   - Updated `normalizePaper` in [js/statistic.js](file:///home/default_user/research_acc/js/statistic.js) similarly to ensure consistency across search, list, and statistics views.
+
+3. **Frontend Rendering Logic for Bilingual Titles**:
+   - Updated `renderPapers` in [js/app.js](file:///home/default_user/research_acc/js/app.js) to display the bilingual title (original English title + Chinese translation directly below it with CSS class `paper-title-zh`) on paper list cards.
+   - Updated `showPaperDetails` in [js/app.js](file:///home/default_user/research_acc/js/app.js) to render the bilingual title (with CSS class `paper-modal-title-zh` for the translation) in the paper detail modal view.
+   - Updated `showRelatedPapers` in [js/statistic.js](file:///home/default_user/research_acc/js/statistic.js) to display the bilingual title in the sidebar list for keyword search results under the statistics tab.
+
+---
 
 ## Files Changed
-- [server.py](file:///home/default_user/research_acc/server.py): Integrated memory sessions, auth verification dependencies, date directory scanning, and JSONL reader endpoints.
-- [tests/test_server.py](file:///home/default_user/research_acc/tests/test_server.py): Added test suite `test_auth_and_data_apis`.
+
+- [tests/test_server.py](file:///home/default_user/research_acc/tests/test_server.py) (Mock paper update and API schema assertion)
+- [js/app.js](file:///home/default_user/research_acc/js/app.js) (Normalized data extraction & rendering in cards/modals)
+- [js/statistic.js](file:///home/default_user/research_acc/js/statistic.js) (Normalized data extraction & rendering in statistics sidebar)
+
+---
+
+## TDD Evidence
+
+### 1. RED (Failing Test Run)
+First, the assertion `assert response.json()[0]["AI"]["translated_title"] == "测试论文标题"` was added without updating the mock data generator:
+
+```bash
+$ PYTHONPATH=. .venv/bin/pytest tests/test_server.py -v
+============================= test session starts ==============================
+...
+tests/test_server.py::test_auth_and_data_apis FAILED                     [100%]
+
+=================================== FAILURES ===================================
+___________________________ test_auth_and_data_apis ____________________________
+...
+    # Get papers
+    response = client.get("/api/papers?date=2026-07-09&lang=Chinese", headers=headers)
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["title"] == "Test Paper"
+>   assert response.json()[0]["AI"]["translated_title"] == "测试论文标题"
+E   KeyError: 'translated_title'
+
+tests/test_server.py:84: KeyError
+==================== 1 failed, 5 passed, 1 warning in 0.29s ====================
+```
+
+### 2. GREEN (Passing Test Run)
+After updating the mock data file generator to include `translated_title` under the nested `AI` key, all tests successfully passed:
+
+```bash
+$ PYTHONPATH=. .venv/bin/pytest tests/test_server.py -v
+============================= test session starts ==============================
+...
+tests/test_server.py::test_index_page PASSED                             [ 16%]
+tests/test_server.py::test_login_page PASSED                             [ 33%]
+tests/test_server.py::test_settings_page PASSED                          [ 50%]
+tests/test_server.py::test_statistic_page PASSED                         [ 66%]
+tests/test_server.py::test_static_files PASSED                           [ 83%]
+tests/test_server.py::test_auth_and_data_apis PASSED                     [100%]
+
+========================= 6 passed, 1 warning in 0.28s =========================
+```
+
+---
 
 ## Self-Review Findings
-- All task brief requirements are fully satisfied.
-- Memory sessions are automatically cleaned up when verifying an expired token.
-- Tested offline fallback behaviors to handle any missing files cleanly (dates returns empty, papers returns 404).
+
+- **Data Safety**: Checked checks for null/undefined/missing properties in the JSON response payload. Handled gracefully by fallback to empty string `''`.
+- **Duplicate Prevention**: Title translation is only displayed if it is present and not identical to the original English title.
+- **Test Integrity**: Ensured FastAPI test properly cleans up its created temporary files (`test_file`) in a `finally` block.
+
+---
 
 ## Issues or Concerns
-- The virtual environment initially had a broken system interpreter link (Python 3.12). This was solved by rebuilding `.venv` with the system Python 3.14 and syncing dependencies inside the local project workspace.
-
-## Update: Security and Concurrency Fixes (chore: fix api security and session concurrency issues)
-1. **Path Traversal Mitigation in `/api/papers`**:
-   - Added regex pattern validations to strictly match input date format (`^\d{4}-\d{2}-\d{2}$`) and language format (`^[a-zA-Z]+$`), raising a `400 Bad Request` on mismatch.
-   - Added unit test validation checks to verify that `400 Bad Request` is successfully returned for invalid parameter formats.
-2. **Concurrency Safe Session Popping**:
-   - Replaced checking-and-popping pattern in token verification with a thread-safe `active_sessions.pop(token, None)` fallback invocation.
-
+None. The code and tests conform exactly to requirements.

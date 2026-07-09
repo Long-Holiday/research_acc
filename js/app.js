@@ -1,3 +1,16 @@
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>'"]/g, 
+    tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag)
+  );
+}
+
 let currentDate = '';
 let availableDates = [];
 let currentView = 'grid'; // 'grid' 或 'list'
@@ -1295,7 +1308,7 @@ function renderPapers() {
       <div class="paper-card-header">
         <h3 class="paper-card-title">
           ${highlightedTitle}
-          ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${paper.translated_title}</div>` : ''}
+          ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${escapeHtml(paper.translated_title)}</div>` : ''}
         </h3>
         <p class="paper-card-authors">${formattedAuthors}</p>
         <div class="paper-card-categories">
@@ -1345,7 +1358,7 @@ function showPaperDetails(paper, paperIndex) {
   // 在标题前添加索引号
   let titleHtml = highlightedTitle;
   if (paper.translated_title && paper.translated_title !== paper.title) {
-    titleHtml += `<div class="paper-modal-title-zh">${paper.translated_title}</div>`;
+    titleHtml += `<div class="paper-modal-title-zh">${escapeHtml(paper.translated_title)}</div>`;
   }
   modalTitle.innerHTML = paperIndex ? `<span class="paper-index-badge">${paperIndex}</span> ${titleHtml}` : titleHtml;
   

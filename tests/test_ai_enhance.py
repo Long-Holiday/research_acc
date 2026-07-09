@@ -94,6 +94,6 @@ def test_process_single_item_fallback():
     }
     res = process_single_item(chain, item, "Chinese")
     assert "AI" in res
-    assert res["AI"]["translated_title"] == "Title translation failed"
+    assert res["AI"]["translated_title"] == ""
 
 

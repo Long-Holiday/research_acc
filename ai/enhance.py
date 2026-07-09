@@ -35,6 +35,7 @@ def parse_args():
     return parser.parse_args()
 
 def process_single_item(chain, item: Dict, language: str) -> Dict:
+    """处理单个数据项"""
 
     def check_github_code(content: str) -> Dict:
         """提取并验证 GitHub 链接"""
@@ -89,10 +90,9 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
     if code_info:
         item.update(code_info)
 
-    """处理单个数据项"""
     # Default structure with meaningful fallback values
     default_ai_fields = {
-        "translated_title": "Title translation failed",
+        "translated_title": "",
         "tldr": "Summary generation failed",
         "motivation": "Motivation analysis unavailable",
         "method": "Method extraction failed",
@@ -180,7 +180,7 @@ def process_all_items(data: List[Dict], model_name: str, language: str, max_work
                 # Add default AI fields to ensure consistency
                 processed_data[idx] = data[idx]
                 processed_data[idx]['AI'] = {
-                    "translated_title": "Processing failed",
+                    "translated_title": "",
                     "tldr": "Processing failed",
                     "motivation": "Processing failed",
                     "method": "Processing failed",

@@ -1,3 +1,16 @@
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>'"]/g, 
+    tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag)
+  );
+}
+
 let currentDate = '';
 let availableDates = [];
 let paperData = {};
@@ -962,7 +975,7 @@ function showRelatedPapers(keyword) {
             <div class="paper-number">${index + 1}</div>
             <a href="${paper.url}" target="_blank" class="paper-title">
                 ${paper.title}
-                ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${paper.translated_title}</div>` : ''}
+                ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${escapeHtml(paper.translated_title)}</div>` : ''}
             </a>
             <div class="paper-authors">${paper.authors}</div>
             <div class="paper-categories">
