@@ -2,6 +2,7 @@ import os
 import uuid
 import time
 import json
+import re
 from fastapi import FastAPI, Depends, HTTPException, Header, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,8 +25,7 @@ def verify_token(authorization: str = Header(None)):
     token = authorization.split(" ")[1]
     expiry = active_sessions.get(token)
     if not expiry or time.time() > expiry:
-        if token in active_sessions:
-            active_sessions.pop(token)
+        active_sessions.pop(token, None)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired or invalid")
     return token
 
@@ -70,6 +70,9 @@ def get_dates(token: str = Depends(verify_token)):
 
 @app.get("/api/papers")
 def get_papers(date: str, lang: str, token: str = Depends(verify_token)):
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date) or not re.match(r"^[a-zA-Z]+$", lang):
+        raise HTTPException(status_code=400, detail="Invalid date or language format")
+        
     filepath = f"data/{date}_AI_enhanced_{lang}.jsonl"
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Papers not found for this date and language")

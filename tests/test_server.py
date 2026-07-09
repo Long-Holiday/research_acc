@@ -80,6 +80,14 @@ def test_auth_and_data_apis():
         assert response.status_code == 200
         assert len(response.json()) == 1
         assert response.json()[0]["title"] == "Test Paper"
+
+        # Invalid date format should return 400
+        response = client.get("/api/papers?date=2026/07/09&lang=Chinese", headers=headers)
+        assert response.status_code == 400
+
+        # Invalid lang format should return 400
+        response = client.get("/api/papers?date=2026-07-09&lang=../Chinese", headers=headers)
+        assert response.status_code == 400
     finally:
         if os.path.exists(test_file):
             os.remove(test_file)
