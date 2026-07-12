@@ -1109,3 +1109,56 @@ input:checked + .toggle-slider:before {
   font-weight: 500;
   line-height: 1.4;
 }
+
+.network-visualization {
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: var(--bg-panel, #ffffff);
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.network-visualization h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1.25rem;
+    color: var(--text-primary);
+}
+
+.network-node {
+    stroke: #fff;
+    stroke-width: 1.5px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.network-node:hover {
+    stroke: #000;
+    stroke-width: 2px;
+}
+
+.network-link {
+    stroke: #999;
+    stroke-opacity: 0.6;
+}
+
+.network-label {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    pointer-events: none;
+    fill: var(--text-secondary);
+}
+
+.network-tooltip {
+    position: absolute;
+    text-align: center;
+    padding: 8px;
+    font: 12px sans-serif;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    border-radius: 4px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 100;
+}
