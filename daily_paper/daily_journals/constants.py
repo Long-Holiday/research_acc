@@ -38,5 +38,40 @@ JOURNALS = [
         "name": "GIScience & RS",
         "issns": ["1548-1603", "1943-7226"],
         "category": "GIScience & RS"
+    },
+    {
+        "name": "GRSM",
+        "issns": ["2168-6831", "2473-2397"],
+        "category": "IEEE GRSM"
+    },
+    {
+        "name": "Journal of Remote Sensing",
+        "issns": ["2694-1589"],
+        "category": "Journal of Remote Sensing"
+    },
+    {
+        "name": "IJRS",
+        "issns": ["0143-1161", "1366-5901"],
+        "category": "IJRS"
+    },
+    {
+        "name": "GSIS",
+        "issns": ["1009-5020", "1993-5153"],
+        "category": "GSIS"
+    },
+    {
+        "name": "Computers & Geosciences",
+        "issns": ["0098-3004"],
+        "category": "Computers & Geosciences"
+    },
+    {
+        "name": "PE&RS",
+        "issns": ["0099-1112", "2374-8079"],
+        "category": "PE&RS"
+    },
+    {
+        "name": "JARS",
+        "issns": ["1931-3195"],
+        "category": "JARS"
     }
 ]
