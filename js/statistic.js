@@ -673,6 +673,13 @@ function renderCategoryStats(category, validDatesInRange) {
       drawTrendChart(trendData, validDatesInRange);
     }, 50);
   }
+
+  // 渲染文献计量分析网络图
+  if (document.getElementById('networkContainer')) {
+    setTimeout(() => {
+      renderNetwork(filteredPapers);
+    }, 50);
+  }
 }
 
 function drawTrendChart(trendData, validDatesInRange) {
@@ -1041,4 +1048,146 @@ function buildNetworkData(papers, topN = 30) {
     const links = Object.values(linkMap);
 
     return { nodes, links };
+}
+
+function renderNetwork(papers) {
+    const container = document.getElementById('networkContainer');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    const { nodes, links } = buildNetworkData(papers, 35);
+    if (nodes.length === 0) {
+        container.innerHTML = '<div style="padding:20px;text-align:center;">No sufficient keyword data found.</div>';
+        return;
+    }
+
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 500;
+    
+    // Setup SVG and Tooltip
+    const tooltip = d3.select(container).append("div")
+        .attr("class", "network-tooltip");
+
+    const svg = d3.select(container).append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+    const g = svg.append("g");
+
+    // Zoom
+    svg.call(d3.zoom()
+        .scaleExtent([0.1, 4])
+        .on("zoom", (event) => {
+            g.attr("transform", event.transform);
+        }));
+
+    // Color scale
+    const color = d3.scaleOrdinal(d3.schemeCategory10);
+    
+    // Size scale
+    const sizeScale = d3.scaleSqrt()
+        .domain([d3.min(nodes, d => d.value) || 1, d3.max(nodes, d => d.value) || 10])
+        .range([5, 20]);
+
+    // Force simulation
+    const simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+        .force("charge", d3.forceManyBody().strength(-200))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collide", d3.forceCollide().radius(d => sizeScale(d.value) + 10));
+
+    // Links
+    const link = g.append("g")
+        .attr("class", "network-links")
+        .selectAll("line")
+        .data(links)
+        .enter().append("line")
+        .attr("class", "network-link")
+        .attr("stroke-width", d => Math.sqrt(d.value));
+
+    // Nodes
+    const node = g.append("g")
+        .attr("class", "network-nodes")
+        .selectAll("circle")
+        .data(nodes)
+        .enter().append("circle")
+        .attr("class", "network-node")
+        .attr("r", d => sizeScale(d.value))
+        .attr("fill", d => color(d.id))
+        .call(d3.drag()
+            .on("start", dragstarted)
+            .on("drag", dragged)
+            .on("end", dragended));
+
+    // Labels
+    const label = g.append("g")
+        .attr("class", "network-labels")
+        .selectAll("text")
+        .data(nodes)
+        .enter().append("text")
+        .attr("class", "network-label")
+        .text(d => d.id)
+        .attr("x", 8)
+        .attr("y", "0.31em");
+
+    // Interactivity
+    node.on("mouseover", (event, d) => {
+        // Dim others
+        node.style("opacity", o => isConnected(d, o) ? 1 : 0.1);
+        link.style("stroke-opacity", o => (o.source === d || o.target === d ? 1 : 0.1));
+        label.style("opacity", o => isConnected(d, o) ? 1 : 0.1);
+        
+        tooltip.transition().duration(200).style("opacity", 1);
+        tooltip.html(`<b>${d.id}</b><br/>Freq: ${d.value}`)
+            .style("left", (event.pageX + 10) + "px")
+            .style("top", (event.pageY - 28) + "px");
+    }).on("mouseout", () => {
+        node.style("opacity", 1);
+        link.style("stroke-opacity", 0.6);
+        label.style("opacity", 1);
+        tooltip.transition().duration(500).style("opacity", 0);
+    }).on("click", (event, d) => {
+        // Reuse sidebar logic
+        if (typeof showRelatedPapers === 'function') {
+            showRelatedPapers(d.id);
+        }
+    });
+
+    const linkedByIndex = {};
+    links.forEach(d => {
+        linkedByIndex[`${d.source.id || d.source},${d.target.id || d.target}`] = 1;
+    });
+
+    function isConnected(a, b) {
+        return linkedByIndex[`${a.id},${b.id}`] || linkedByIndex[`${b.id},${a.id}`] || a.id === b.id;
+    }
+
+    simulation.on("tick", () => {
+        link
+            .attr("x1", d => d.source.x)
+            .attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x)
+            .attr("y2", d => d.target.y);
+        node
+            .attr("cx", d => d.x)
+            .attr("cy", d => d.y);
+        label
+            .attr("x", d => d.x + sizeScale(d.value) + 2)
+            .attr("y", d => d.y + 3);
+    });
+
+    function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+    }
+    function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+    }
+    function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+    }
 }
