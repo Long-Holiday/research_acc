@@ -1091,6 +1091,11 @@ function renderNetwork(papers) {
         .domain([d3.min(nodes, d => d.value) || 1, d3.max(nodes, d => d.value) || 10])
         .range([5, 20]);
 
+    // Link width scale to make strength visually distinguishable
+    const linkWidthScale = d3.scaleSqrt()
+        .domain([d3.min(links, d => d.value) || 1, d3.max(links, d => d.value) || 5])
+        .range([1, 8]);
+
     // Force simulation
     const simulation = d3.forceSimulation(nodes)
         .force("link", d3.forceLink(links).id(d => d.id).distance(100))
@@ -1105,7 +1110,7 @@ function renderNetwork(papers) {
         .data(links)
         .enter().append("line")
         .attr("class", "network-link")
-        .attr("stroke-width", d => Math.sqrt(d.value));
+        .attr("stroke-width", d => linkWidthScale(d.value));
 
     // Nodes
     const node = g.append("g")
