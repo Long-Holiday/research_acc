@@ -1002,9 +1002,10 @@ function closeSidebar() {
 
 function buildNetworkData(papers, topN = 30) {
     const keywordFreq = {};
-    papers.forEach(p => {
-        if (!p.keywords) return;
-        p.keywords.forEach(k => {
+    (papers || []).forEach(p => {
+        if (!p.keywords || !Array.isArray(p.keywords)) return;
+        const uniqueKeywords = Array.from(new Set(p.keywords));
+        uniqueKeywords.forEach(k => {
             keywordFreq[k] = (keywordFreq[k] || 0) + 1;
         });
     });
@@ -1018,9 +1019,10 @@ function buildNetworkData(papers, topN = 30) {
     const nodes = sortedKeywords.map(k => ({ id: k, value: keywordFreq[k] }));
     const linkMap = {};
 
-    papers.forEach(p => {
-        if (!p.keywords) return;
-        const validKws = p.keywords.filter(k => validKeywordsSet.has(k));
+    (papers || []).forEach(p => {
+        if (!p.keywords || !Array.isArray(p.keywords)) return;
+        const uniqueKeywords = Array.from(new Set(p.keywords));
+        const validKws = uniqueKeywords.filter(k => validKeywordsSet.has(k));
         for (let i = 0; i < validKws.length; i++) {
             for (let j = i + 1; j < validKws.length; j++) {
                 const k1 = validKws[i];
