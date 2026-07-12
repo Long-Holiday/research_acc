@@ -999,3 +999,42 @@ function closeSidebar() {
   const sidebar = document.getElementById('paperSidebar');
   sidebar.classList.remove('active');
 }
+
+function buildNetworkData(papers, topN = 30) {
+    const keywordFreq = {};
+    papers.forEach(p => {
+        if (!p.keywords) return;
+        p.keywords.forEach(k => {
+            keywordFreq[k] = (keywordFreq[k] || 0) + 1;
+        });
+    });
+
+    const sortedKeywords = Object.keys(keywordFreq)
+        .sort((a, b) => keywordFreq[b] - keywordFreq[a])
+        .slice(0, topN);
+    
+    const validKeywordsSet = new Set(sortedKeywords);
+    
+    const nodes = sortedKeywords.map(k => ({ id: k, value: keywordFreq[k] }));
+    const linkMap = {};
+
+    papers.forEach(p => {
+        if (!p.keywords) return;
+        const validKws = p.keywords.filter(k => validKeywordsSet.has(k));
+        for (let i = 0; i < validKws.length; i++) {
+            for (let j = i + 1; j < validKws.length; j++) {
+                const k1 = validKws[i];
+                const k2 = validKws[j];
+                const key = k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
+                linkMap[key] = (linkMap[key] || 0) + 1;
+            }
+        }
+    });
+
+    const links = Object.keys(linkMap).map(key => {
+        const [source, target] = key.split('|');
+        return { source, target, value: linkMap[key] };
+    });
+
+    return { nodes, links };
+}
