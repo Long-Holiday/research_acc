@@ -350,6 +350,8 @@ header {
 }
 
 .category-scroll {
+  flex: 1;
+  min-width: 0;
   display: flex;
   overflow-x: auto;
   gap: 10px;
@@ -364,6 +366,8 @@ header {
 }
 
 .filter-scroll {
+  flex: 1;
+  min-width: 0;
   display: flex;
   overflow-x: auto;
   gap: 10px;
