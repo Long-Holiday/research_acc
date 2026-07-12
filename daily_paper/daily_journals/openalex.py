@@ -6,12 +6,15 @@ def reconstruct_abstract(inverted_index):
     if not inverted_index:
         return "No abstract available in OpenAlex."
     try:
-        positions = {}
-        for word, pos_list in inverted_index.items():
-            for pos in pos_list:
-                positions[pos] = word
-        sorted_words = [positions[i] for i in sorted(positions.keys())]
-        return " ".join(sorted_words)
+        # 找出所有的单词和它们对应的位置，并按位置排序
+        word_positions = []
+        for word, positions in inverted_index.items():
+            for pos in positions:
+                word_positions.append((pos, word))
+        
+        word_positions.sort()
+        # 将单词拼接成完整的句子
+        return " ".join([word for pos, word in word_positions])
     except Exception as e:
         print(f"Error reconstructing abstract: {e}")
         return "No abstract available in OpenAlex."
