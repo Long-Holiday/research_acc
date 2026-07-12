@@ -1027,16 +1027,18 @@ function buildNetworkData(papers, topN = 30) {
             for (let j = i + 1; j < validKws.length; j++) {
                 const k1 = validKws[i];
                 const k2 = validKws[j];
-                const key = k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
-                linkMap[key] = (linkMap[key] || 0) + 1;
+                const source = k1 < k2 ? k1 : k2;
+                const target = k1 < k2 ? k2 : k1;
+                const key = JSON.stringify([source, target]);
+                if (!linkMap[key]) {
+                    linkMap[key] = { source, target, value: 0 };
+                }
+                linkMap[key].value += 1;
             }
         }
     });
 
-    const links = Object.keys(linkMap).map(key => {
-        const [source, target] = key.split('|');
-        return { source, target, value: linkMap[key] };
-    });
+    const links = Object.values(linkMap);
 
     return { nodes, links };
 }
