@@ -17,7 +17,7 @@ let paperData = {};
 let flatpickrStartInstance = null;
 let flatpickrEndInstance = null;
 let allPapersData = [];
-let selectedCategory = 'All';
+let selectedCategories = ['All'];
 
 // Categories names are displayed directly from data keys to match the main page
 
@@ -556,26 +556,69 @@ function renderCategoryTabs(validDatesInRange) {
   tabs.forEach(tab => {
     tab.addEventListener('click', (e) => {
       const target = e.currentTarget;
-      tabs.forEach(t => t.classList.remove('active'));
-      target.classList.add('active');
+      const cat = target.getAttribute('data-category');
       
-      selectedCategory = target.getAttribute('data-category');
-      renderCategoryStats(selectedCategory, validDatesInRange);
+      if (cat === 'All') {
+        selectedCategories = ['All'];
+        tabs.forEach(t => t.classList.remove('active'));
+        target.classList.add('active');
+      } else {
+        // Remove 'All' if present
+        if (selectedCategories.includes('All')) {
+          selectedCategories = [];
+          document.querySelector('.category-tab[data-category="All"]')?.classList.remove('active');
+        }
+        
+        if (selectedCategories.includes(cat)) {
+          // Deselect
+          selectedCategories = selectedCategories.filter(c => c !== cat);
+          target.classList.remove('active');
+          
+          // If empty, revert to 'All'
+          if (selectedCategories.length === 0) {
+            selectedCategories = ['All'];
+            document.querySelector('.category-tab[data-category="All"]')?.classList.add('active');
+          }
+        } else {
+          // Select
+          selectedCategories.push(cat);
+          target.classList.add('active');
+        }
+      }
+      
+      renderCategoryStats(selectedCategories, validDatesInRange);
     });
   });
 
-  // 4. 默认首次渲染 "All" 分类
-  selectedCategory = 'All';
-  renderCategoryStats('All', validDatesInRange);
+  // 4. 恢复选中状态或默认 "All"
+  const validSelections = selectedCategories.filter(cat => cat === 'All' || availableCategories.includes(cat));
+  if (validSelections.length === 0) {
+    selectedCategories = ['All'];
+  } else {
+    selectedCategories = validSelections;
+  }
+  
+  tabs.forEach(t => {
+    const cat = t.getAttribute('data-category');
+    if (selectedCategories.includes(cat)) {
+      t.classList.add('active');
+    } else {
+      t.classList.remove('active');
+    }
+  });
+
+  renderCategoryStats(selectedCategories, validDatesInRange);
 }
 
-function renderCategoryStats(category, validDatesInRange) {
+function renderCategoryStats(categories, validDatesInRange) {
   const statsContainer = document.getElementById('categoryStatsContent');
   if (!statsContainer) return;
   
-  const filteredPapers = category === 'All' 
+  const isAll = categories.includes('All');
+  
+  const filteredPapers = isAll 
     ? allPapersData 
-    : allPapersData.filter(paper => paper.category && paper.category[0] === category);
+    : allPapersData.filter(paper => paper.category && categories.includes(paper.category[0]));
     
   if (filteredPapers.length === 0) {
     statsContainer.innerHTML = `
@@ -632,7 +675,7 @@ function renderCategoryStats(category, validDatesInRange) {
     };
   });
   
-  const categoryDisplayName = category === 'All' ? 'All Categories (全部)' : category;
+  const categoryDisplayName = isAll ? 'All Categories (全部)' : categories.join(', ');
   const hasMultipleDates = validDatesInRange.length > 1;
   
   statsContainer.innerHTML = `
