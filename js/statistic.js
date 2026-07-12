@@ -105,48 +105,57 @@ function toggleDatePicker() {
 function initEventListeners() {
   // 只允许通过日历按钮打开日期选择器
   const calendarButton = document.getElementById('calendarButton');
-  calendarButton.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleDatePicker();
-  });
+  if (calendarButton) {
+    calendarButton.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDatePicker();
+    });
+  }
   
   // 点击模态框背景时关闭
   const datePickerModal = document.querySelector('.date-picker-modal');
-  datePickerModal.addEventListener('click', (event) => {
-    if (event.target === datePickerModal) {
-      toggleDatePicker();
-    }
-  });
+  if (datePickerModal) {
+    datePickerModal.addEventListener('click', (event) => {
+      if (event.target === datePickerModal) {
+        toggleDatePicker();
+      }
+    });
+  }
   
   // 阻止日期选择器内容区域的点击事件冒泡
   const datePickerContent = document.querySelector('.date-picker-content');
-  datePickerContent.addEventListener('click', (e) => {
-    e.stopPropagation();
-  });
+  if (datePickerContent) {
+    datePickerContent.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+  }
   
-  document.getElementById('applyDateRange').addEventListener('click', () => {
-    if (flatpickrStartInstance && flatpickrEndInstance) {
-      const startDates = flatpickrStartInstance.selectedDates;
-      const endDates = flatpickrEndInstance.selectedDates;
-      
-      if (startDates.length > 0 && endDates.length > 0) {
-        let startDate = formatDateForAPI(startDates[0]);
-        let endDate = formatDateForAPI(endDates[0]);
+  const applyDateRangeBtn = document.getElementById('applyDateRange');
+  if (applyDateRangeBtn) {
+    applyDateRangeBtn.addEventListener('click', () => {
+      if (flatpickrStartInstance && flatpickrEndInstance) {
+        const startDates = flatpickrStartInstance.selectedDates;
+        const endDates = flatpickrEndInstance.selectedDates;
         
-        if (new Date(startDate) > new Date(endDate)) {
-          // 交换日期
-          const temp = startDate;
-          startDate = endDate;
-          endDate = temp;
+        if (startDates.length > 0 && endDates.length > 0) {
+          let startDate = formatDateForAPI(startDates[0]);
+          let endDate = formatDateForAPI(endDates[0]);
+          
+          if (new Date(startDate) > new Date(endDate)) {
+            // 交换日期
+            const temp = startDate;
+            startDate = endDate;
+            endDate = temp;
+          }
+          
+          loadPapersByDateRange(startDate, endDate);
+          toggleDatePicker();
+        } else {
+          alert('Please select both start and end dates.');
         }
-        
-        loadPapersByDateRange(startDate, endDate);
-        toggleDatePicker();
-      } else {
-        alert('Please select both start and end dates.');
       }
-    }
-  });
+    });
+  }
   
   // 添加侧边栏关闭按钮事件
   const closeButton = document.querySelector('.close-sidebar');
