@@ -14,8 +14,8 @@ function escapeHtml(str) {
 let currentDate = '';
 let availableDates = [];
 let paperData = {};
-let flatpickrInstance = null;
-let isRangeMode = true;
+let flatpickrStartInstance = null;
+let flatpickrEndInstance = null;
 let allPapersData = [];
 let selectedCategory = 'All';
 
@@ -89,8 +89,13 @@ function toggleDatePicker() {
     document.body.style.overflow = 'hidden';
     
     // 重新初始化日期选择器以确保它反映最新的可用日期
-    if (flatpickrInstance) {
-      flatpickrInstance.setDate(currentDate, false);
+    if (flatpickrStartInstance && flatpickrEndInstance && currentDate.includes(' - ')) {
+      const dates = currentDate.split(' - ');
+      flatpickrStartInstance.setDate(dates[0], false);
+      flatpickrEndInstance.setDate(dates[1], false);
+    } else if (flatpickrStartInstance && flatpickrEndInstance) {
+      flatpickrStartInstance.setDate(currentDate, false);
+      flatpickrEndInstance.setDate(currentDate, false);
     }
   } else {
     document.body.style.overflow = '';
@@ -119,7 +124,29 @@ function initEventListeners() {
     e.stopPropagation();
   });
   
-  document.getElementById('dateRangeMode').addEventListener('change', toggleRangeMode);
+  document.getElementById('applyDateRange').addEventListener('click', () => {
+    if (flatpickrStartInstance && flatpickrEndInstance) {
+      const startDates = flatpickrStartInstance.selectedDates;
+      const endDates = flatpickrEndInstance.selectedDates;
+      
+      if (startDates.length > 0 && endDates.length > 0) {
+        let startDate = formatDateForAPI(startDates[0]);
+        let endDate = formatDateForAPI(endDates[0]);
+        
+        if (new Date(startDate) > new Date(endDate)) {
+          // 交换日期
+          const temp = startDate;
+          startDate = endDate;
+          endDate = temp;
+        }
+        
+        loadPapersByDateRange(startDate, endDate);
+        toggleDatePicker();
+      } else {
+        alert('Please select both start and end dates.');
+      }
+    }
+  });
   
   // 添加侧边栏关闭按钮事件
   const closeButton = document.querySelector('.close-sidebar');
@@ -240,11 +267,11 @@ async function fetchAvailableDates() {
 }
 
 function initDatePicker() {
-  const datepickerInput = document.getElementById('datepicker');
+  const startInput = document.getElementById('startDatePicker');
+  const endInput = document.getElementById('endDatePicker');
   
-  if (flatpickrInstance) {
-    flatpickrInstance.destroy();
-  }
+  if (flatpickrStartInstance) flatpickrStartInstance.destroy();
+  if (flatpickrEndInstance) flatpickrEndInstance.destroy();
   
   // 创建可用日期的映射，用于禁用无效日期
   const enabledDatesMap = {};
@@ -253,10 +280,11 @@ function initDatePicker() {
   });
   
   // 默认加载最近一个月
-  let defaultDates = availableDates[0];
-  if (isRangeMode && availableDates.length > 0) {
-    const latestDateStr = availableDates[0];
-    const latestDate = new Date(latestDateStr);
+  let defaultEndDate = availableDates.length > 0 ? availableDates[0] : null;
+  let defaultStartDate = defaultEndDate;
+  
+  if (availableDates.length > 0) {
+    const latestDate = new Date(defaultEndDate);
     const oneMonthAgo = new Date(latestDate);
     oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
     
@@ -264,17 +292,13 @@ function initDatePicker() {
                            String(oneMonthAgo.getMonth() + 1).padStart(2, '0') + "-" + 
                            String(oneMonthAgo.getDate()).padStart(2, '0');
                            
-    const datesInRange = availableDates.filter(d => d >= oneMonthAgoStr && d <= latestDateStr);
-    const startDateStr = datesInRange.length > 0 ? datesInRange[datesInRange.length - 1] : latestDateStr;
-    defaultDates = [new Date(startDateStr), new Date(latestDateStr)];
+    const datesInRange = availableDates.filter(d => d >= oneMonthAgoStr && d <= defaultEndDate);
+    defaultStartDate = datesInRange.length > 0 ? datesInRange[datesInRange.length - 1] : defaultEndDate;
   }
   
-  // 配置 Flatpickr
-  flatpickrInstance = flatpickr(datepickerInput, {
+  const commonConfig = {
     inline: true,
     dateFormat: "Y-m-d",
-    mode: isRangeMode ? 'range' : 'single',
-    defaultDate: defaultDates,
     enable: [
       function(date) {
         // 只启用有效日期
@@ -283,44 +307,25 @@ function initDatePicker() {
                         String(date.getDate()).padStart(2, '0');
         return !!enabledDatesMap[dateStr];
       }
-    ],
-    onChange: function(selectedDates, dateStr) {
-      if (isRangeMode && selectedDates.length === 2) {
-        // 处理日期范围选择
-        const startDate = formatDateForAPI(selectedDates[0]);
-        const endDate = formatDateForAPI(selectedDates[1]);
-        loadPapersByDateRange(startDate, endDate);
-        toggleDatePicker();
-      } else if (!isRangeMode && selectedDates.length === 1) {
-        // 处理单个日期选择
-        const selectedDate = formatDateForAPI(selectedDates[0]);
-        if (availableDates.includes(selectedDate)) {
-          loadPapersByDateRange(selectedDate, selectedDate);
-          toggleDatePicker();
-        }
-      }
-    }
+    ]
+  };
+  
+  // 配置 Flatpickr
+  flatpickrStartInstance = flatpickr(startInput, {
+    ...commonConfig,
+    defaultDate: defaultStartDate
   });
   
-  // 隐藏日期输入框
-  const inputElement = document.querySelector('.flatpickr-input');
-  if (inputElement) {
-    inputElement.style.display = 'none';
-  }
+  flatpickrEndInstance = flatpickr(endInput, {
+    ...commonConfig,
+    defaultDate: defaultEndDate
+  });
 }
 
 function formatDateForAPI(date) {
   return date.getFullYear() + "-" + 
          String(date.getMonth() + 1).padStart(2, '0') + "-" + 
          String(date.getDate()).padStart(2, '0');
-}
-
-function toggleRangeMode() {
-  isRangeMode = document.getElementById('dateRangeMode').checked;
-  
-  if (flatpickrInstance) {
-    flatpickrInstance.set('mode', isRangeMode ? 'range' : 'single');
-  }
 }
 
 // 提取关键词并进行总结
@@ -609,10 +614,12 @@ function renderCategoryStats(category, validDatesInRange) {
   const trendData = top10Keywords.map(keyword => {
     return {
       keyword: keyword,
-      values: Array.from(keywordTrends.entries()).map(([date, stats]) => ({
-        date: new Date(date + 'T00:00:00Z'),
-        count: stats.get(keyword) || 0
-      })).sort((a, b) => a.date - b.date)
+      values: Array.from(keywordTrends.entries())
+        .filter(([date, stats]) => stats.get(keyword) > 0)
+        .map(([date, stats]) => ({
+          date: new Date(date + 'T00:00:00Z'),
+          count: stats.get(keyword)
+        })).sort((a, b) => a.date - b.date)
     };
   });
   
@@ -722,6 +729,13 @@ function drawTrendChart(trendData, validDatesInRange) {
     .range(['#4e79a7', '#f28e2c', '#59a14f', '#e15759', '#76b7b2', 
             '#edc949', '#af7aa1', '#ff9da7', '#9c755f', '#bab0ab']);
 
+  // 提取 X 轴刻度，避免重复日期
+  const tickValues = [];
+  const step = Math.max(1, Math.ceil(validDatesInRange.length / 8));
+  for (let i = 0; i < validDatesInRange.length; i += step) {
+    tickValues.push(new Date(validDatesInRange[i] + 'T00:00:00Z'));
+  }
+
   // 添加X轴网格线
   svg.append('g')
     .attr('class', 'grid')
@@ -729,7 +743,7 @@ function drawTrendChart(trendData, validDatesInRange) {
     .style('stroke-dasharray', '3,3')
     .style('opacity', 0.1)
     .call(d3.axisBottom(x)
-      .ticks(8)
+      .tickValues(tickValues)
       .tickSize(-height)
       .tickFormat(''));
 
@@ -766,7 +780,7 @@ function drawTrendChart(trendData, validDatesInRange) {
     .attr('class', 'x-axis')
     .attr('transform', `translate(0,${height})`)
     .call(d3.axisBottom(x)
-      .ticks(Math.min(validDatesInRange.length, 8))
+      .tickValues(tickValues)
       .tickFormat(dateFormat))
     .selectAll("text")
     .style("text-anchor", "end")

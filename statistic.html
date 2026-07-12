@@ -103,28 +103,36 @@
                     <div class="date-picker-modal" id="datePickerModal">
                         <div class="date-picker-content">
                             <div class="date-picker-body">
-                                <h3 class="date-picker-title">Select Date</h3>
-                                <div class="flatpickr-container">
-                                    <input type="text" id="datepicker" placeholder="Select Date" data-input>
+                                <h3 class="date-picker-title">Select Date Range</h3>
+                                <div class="date-picker-inputs" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+                                    <div class="date-input-group">
+                                        <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Start Date</label>
+                                        <div class="flatpickr-container">
+                                            <input type="text" id="startDatePicker" placeholder="Select Start Date" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-family: inherit; font-size: 14px; box-sizing: border-box;">
+                                        </div>
+                                    </div>
+                                    <div class="date-input-group">
+                                        <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">End Date</label>
+                                        <div class="flatpickr-container">
+                                            <input type="text" id="endDatePicker" placeholder="Select End Date" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-family: inherit; font-size: 14px; box-sizing: border-box;">
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="date-range-selector">
-                                    <span class="toggle-label">Range</span>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="dateRangeMode" checked>
-                                        <span class="toggle-slider"></span>
-                                    </label>
+                                <div class="date-actions" style="display: flex; justify-content: flex-end; gap: 10px;">
+                                    <button onclick="toggleDatePicker()" class="cancel-button" style="padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--border-color); background: transparent; cursor: pointer; color: var(--text-primary);">Cancel</button>
+                                    <button id="applyDateRange" class="action-button" style="padding: 8px 16px; border-radius: var(--radius-md); background: var(--primary-color); color: white; border: none; cursor: pointer; font-weight: 500;">Apply</button>
                                 </div>
                             </div>
                         </div>
                     </div>
 
+                    <div id="papersList">
+                        <!-- Paper statistics will be dynamically inserted here -->
+                    </div>
+
                     <div class="network-visualization">
                         <h3>Keyword Co-occurrence Network</h3>
                         <div id="networkContainer" style="width: 100%; height: 500px; background: var(--bg-secondary); border-radius: 8px; overflow: hidden; position: relative;"></div>
-                    </div>
-
-                    <div id="papersList">
-                        <!-- Paper statistics will be dynamically inserted here -->
                     </div>
                 </div>
             </div>

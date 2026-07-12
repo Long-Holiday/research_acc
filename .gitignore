@@ -19,7 +19,6 @@ wheels/
 .cursorrules
 .agents/
 docs/
-.superpowers/
 
 # Environment variables & secrets
 .env

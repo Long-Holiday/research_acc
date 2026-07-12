@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 import langchain_core.exceptions
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import (
     ChatPromptTemplate,
     SystemMessagePromptTemplate,
@@ -147,7 +148,12 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
 
 def process_all_items(data: List[Dict], model_name: str, language: str, max_workers: int) -> List[Dict]:
     """并行处理所有数据项"""
-    llm = ChatOpenAI(
+    if model_name.lower().startswith("gemini"):
+        llm = ChatGoogleGenerativeAI(
+            model=model_name,
+        ).with_structured_output(Structure)
+    else:
+        llm = ChatOpenAI(
             model=model_name,
             model_kwargs={"extra_body": {"thinking": {"type": "disabled"}}}
         ).with_structured_output(Structure, method="function_calling")
