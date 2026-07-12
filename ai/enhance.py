@@ -22,10 +22,15 @@ from langchain.prompts import (
 )
 from structure import Structure
 
-if os.path.exists('.env'):
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+if os.path.exists(os.path.join(root_dir, '.env')):
+    dotenv.load_dotenv(os.path.join(root_dir, '.env'))
+elif os.path.exists('.env'):
     dotenv.load_dotenv()
-template = open("template.txt", "r").read()
-system = open("system.txt", "r").read()
+
+template = open(os.path.join(current_dir, "template.txt"), "r", encoding="utf-8").read()
+system = open(os.path.join(current_dir, "system.txt"), "r", encoding="utf-8").read()
 
 def parse_args():
     """解析命令行参数"""
