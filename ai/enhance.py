@@ -30,6 +30,10 @@ if os.path.exists(os.path.join(root_dir, '.env')):
 elif os.path.exists('.env'):
     dotenv.load_dotenv()
 
+# 清理环境变量中的空白符和换行符，防止因 \r 导致 URL 解析报错
+for k in os.environ:
+    os.environ[k] = os.environ[k].strip()
+
 template = open(os.path.join(current_dir, "template.txt"), "r", encoding="utf-8").read()
 system = open(os.path.join(current_dir, "system.txt"), "r", encoding="utf-8").read()
 
@@ -155,7 +159,7 @@ def process_all_items(data: List[Dict], model_name: str, language: str, max_work
     else:
         llm = ChatOpenAI(
             model=model_name,
-            model_kwargs={"extra_body": {"thinking": {"type": "disabled"}}}
+            extra_body={"thinking": {"type": "disabled"}}
         ).with_structured_output(Structure, method="function_calling")
 
     print('Connect to:', model_name, file=sys.stderr)
