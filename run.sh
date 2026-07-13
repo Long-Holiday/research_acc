@@ -20,18 +20,19 @@ else
 fi
 
 # 检查必需的环境变量 / Check required environment variables
-if [ -z "$OPENAI_API_KEY" ]; then
-    echo "⚠️  提示：未设置 OPENAI_API_KEY / Warning: OPENAI_API_KEY not set"
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$GOOGLE_API_KEY" ]; then
+    echo "⚠️  提示：未设置 OPENAI_API_KEY 或 GOOGLE_API_KEY / Warning: Neither OPENAI_API_KEY nor GOOGLE_API_KEY is set"
     echo "📝 要进行完整本地调试，请设置以下环境变量 / For complete local debugging, please set the following environment variables:"
     echo ""
-    echo "🔑 必需变量 / Required variables:"
-    echo "   export OPENAI_API_KEY=\"your-api-key-here\""
+    echo "🔑 必需变量 (至少选择一个) / Required variables (choose at least one):"
+    echo "   export OPENAI_API_KEY=\"your-openai-api-key\""
+    echo "   export GOOGLE_API_KEY=\"your-google-api-key\""
     echo ""
     echo "🔧 可选变量 / Optional variables:"
     echo "   export OPENAI_BASE_URL=\"https://api.openai.com/v1\"  # API基础URL / API base URL"
     echo "   export LANGUAGE=\"Chinese\"                           # 语言设置 / Language setting"
     echo "   export CATEGORIES=\"cs.CV, cs.CL\"                    # 关注分类 / Categories of interest"
-    echo "   export MODEL_NAME=\"gpt-4o-mini\"                     # 模型名称 / Model name"
+    echo "   export MODEL_NAME=\"gpt-4o-mini\"                     # 模型名称 / Model name (use gemini-... for google)"
     echo ""
     echo "💡 设置后重新运行此脚本即可进行完整测试 / After setting, rerun this script for complete testing"
     echo "🚀 或者继续运行部分流程（爬取+去重检查）/ Or continue with partial workflow (crawl + dedup check)"
@@ -43,13 +44,24 @@ if [ -z "$OPENAI_API_KEY" ]; then
     fi
     PARTIAL_MODE=true
 else
-    echo "✅ OPENAI_API_KEY 已设置 / OPENAI_API_KEY is set"
+    if [ -n "$OPENAI_API_KEY" ]; then
+        echo "✅ OPENAI_API_KEY 已设置 / OPENAI_API_KEY is set"
+    fi
+    if [ -n "$GOOGLE_API_KEY" ]; then
+        echo "✅ GOOGLE_API_KEY 已设置 / GOOGLE_API_KEY is set"
+    fi
     PARTIAL_MODE=false
     
     # 设置默认值 / Set default values
     export LANGUAGE="${LANGUAGE:-Chinese}"
     export CATEGORIES="${CATEGORIES:-cs.CV, cs.CL}"
-    export MODEL_NAME="${MODEL_NAME:-gpt-4o-mini}"
+    if [ -z "$MODEL_NAME" ]; then
+        if [ -n "$OPENAI_API_KEY" ]; then
+            export MODEL_NAME="gpt-4o-mini"
+        elif [ -n "$GOOGLE_API_KEY" ]; then
+            export MODEL_NAME="gemini-1.5-flash"
+        fi
+    fi
     export OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://api.openai.com/v1}"
     
     echo "🔧 当前配置 / Current configuration:"
@@ -157,5 +169,5 @@ else
     echo "   ✅ 去重检查 / Smart duplicate check"
     echo "   ⏭️  跳过AI增强 / Skipped AI enhancement"
     echo ""
-    echo "💡 提示：设置OPENAI_API_KEY可启用完整功能 / Tip: Set OPENAI_API_KEY to enable full functionality"
+    echo "💡 提示：设置 OPENAI_API_KEY 或 GOOGLE_API_KEY 可启用完整功能 / Tip: Set OPENAI_API_KEY or GOOGLE_API_KEY to enable full functionality"
 fi
