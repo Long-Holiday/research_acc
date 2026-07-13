@@ -45,7 +45,7 @@ def main():
             today_dt = datetime.now(timezone.utc)
         yesterday_dt = today_dt - timedelta(days=1)
         yesterday_str = yesterday_dt.strftime("%Y-%m-%d")
-        from_dt = today_dt - timedelta(days=3)
+        from_dt = today_dt - timedelta(days=7)
         from_date = from_dt.strftime("%Y-%m-%d")
         to_date = yesterday_str
         

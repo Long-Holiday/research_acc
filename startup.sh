@@ -16,8 +16,8 @@ cd "$(dirname "$0")"
 # 获取项目的绝对路径
 PROJECT_DIR="$(pwd)"
 
-# Cron 定时任务配置 (每天晚上 20:11 自动执行)
-CRON_SCHEDULE="40 3 * * *"
+# Cron 定时任务配置 (每天凌晨 1:11 自动执行)
+CRON_SCHEDULE="11 1 * * *"
 CRON_IDENTIFIER="PROJECT_IDENTIFIER=daily_arxiv_crawl"
 CRON_LINE="$CRON_SCHEDULE export PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin && cd $PROJECT_DIR && $CRON_IDENTIFIER ./run.sh >> $PROJECT_DIR/cron_crawl.log 2>&1"
 

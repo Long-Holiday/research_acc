@@ -85,7 +85,7 @@ def perform_deduplication(target_date=None):
 
     today = target_date_obj.strftime("%Y-%m-%d")
     today_file = f"../data/{today}.jsonl"
-    history_days = 3  # 向前追溯几天的数据进行对比
+    history_days = 7  # 向前追溯几天的数据进行对比
 
     if not os.path.exists(today_file):
         print("今日数据文件不存在 / Today's data file does not exist", file=sys.stderr)
