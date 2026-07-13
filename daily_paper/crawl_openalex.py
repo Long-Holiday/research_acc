@@ -11,6 +11,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Load local environment variables if .env exists
 load_dotenv()
 
+# 清理环境变量中的空白符和换行符，防止因 \r 导致解析报错
+for k in os.environ:
+    os.environ[k] = os.environ[k].strip()
+
 from daily_journals import (
     JOURNALS,
     fetch_crossref_papers,

@@ -11,6 +11,10 @@ from pydantic import BaseModel
 
 load_dotenv()
 
+# 清理环境变量中的空白符和换行符，防止因 \r 导致解析报错
+for k in os.environ:
+    os.environ[k] = os.environ[k].strip()
+
 ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD", "")
 active_sessions = {}  # token -> expiry_timestamp
 
