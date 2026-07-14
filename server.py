@@ -94,6 +94,51 @@ def get_papers(date: str, lang: str, token: str = Depends(verify_token)):
     return papers
 
 
+@app.get("/api/papers/range")
+def get_papers_range(
+    start_date: str,
+    end_date: str,
+    lang: str = "en",
+    token: str = Depends(verify_token)
+):
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_date) or not re.match(r"^\d{4}-\d{2}-\d{2}$", end_date) or not re.match(r"^[a-zA-Z]+$", lang):
+        raise HTTPException(status_code=400, detail="Invalid date or language format")
+        
+    try:
+        scan_and_process_files()
+    except Exception as e:
+        print(f"Error scanning files dynamically: {e}")
+        
+    db_path = "data/statistics.db"
+    if not os.path.exists(db_path):
+        return []
+        
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+        SELECT paper_json, paper_date 
+        FROM papers 
+        WHERE paper_date BETWEEN ? AND ? 
+          AND language = ?
+        """, (start_date, end_date, lang))
+        rows = cursor.fetchall()
+        
+        papers = []
+        for paper_json, paper_date in rows:
+            try:
+                p = json.loads(paper_json)
+                p['date'] = paper_date
+                papers.append(p)
+            except Exception:
+                continue
+        return papers
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+    finally:
+        conn.close()
+
+
 # ==========================================
 # Keyword Extraction & SQLite Storage
 # ==========================================
@@ -214,6 +259,15 @@ def scan_and_process_files():
                 keyword TEXT
             )
             """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS papers (
+                paper_id TEXT,
+                paper_date TEXT,
+                language TEXT,
+                paper_json TEXT,
+                PRIMARY KEY (paper_id, paper_date, language)
+            )
+            """)
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ks_date_lang_cat ON keyword_stats (paper_date, language, category)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ks_keyword ON keyword_stats (keyword)")
@@ -221,6 +275,7 @@ def scan_and_process_files():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pk_paper_id ON paper_keywords (paper_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pk_date_lang_cat ON paper_keywords (paper_date, language, category)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pk_keyword ON paper_keywords (keyword)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_papers_date_lang ON papers (paper_date, language)")
             conn.commit()
             
             files = os.listdir(db_dir)
@@ -233,7 +288,12 @@ def scan_and_process_files():
                         
             for filename, paper_date, lang in target_files:
                 cursor.execute("SELECT 1 FROM processed_files WHERE filename = ?", (filename,))
-                if cursor.fetchone():
+                already_processed = cursor.fetchone() is not None
+                
+                cursor.execute("SELECT 1 FROM papers WHERE paper_date = ? AND language = ? LIMIT 1", (paper_date, lang))
+                already_in_papers = cursor.fetchone() is not None
+                
+                if already_processed and already_in_papers:
                     continue
                     
                 filepath = os.path.join(db_dir, filename)
@@ -242,6 +302,7 @@ def scan_and_process_files():
                     
                 stats_map = {}
                 paper_keywords_list = []
+                papers_list = []
                 
                 with open(filepath, "r", encoding="utf-8") as f_in:
                     for line in f_in:
@@ -256,26 +317,36 @@ def scan_and_process_files():
                         paper_id = paper.get("id")
                         if not paper_id:
                             continue
+                        
+                        if not already_in_papers:
+                            papers_list.append((paper_id, paper_date, lang, json.dumps(paper)))
                             
-                        cats = paper.get("categories", [])
-                        category = "unknown"
-                        if isinstance(cats, list) and len(cats) > 0:
-                            category = cats[0]
-                        elif isinstance(cats, str):
-                            cats_split = re.split(r"[,\s]+", cats.strip())
-                            if cats_split and cats_split[0]:
-                                category = cats_split[0]
+                        if not already_processed:
+                            cats = paper.get("categories", [])
+                            category = "unknown"
+                            if isinstance(cats, list) and len(cats) > 0:
+                                category = cats[0]
+                            elif isinstance(cats, str):
+                                cats_split = re.split(r"[,\s]+", cats.strip())
+                                if cats_split and cats_split[0]:
+                                    category = cats_split[0]
+                                    
+                            title = paper.get("title", "")
+                            summary = paper.get("summary", "")
+                            
+                            keywords_with_freq = extract_keywords(title, summary)
+                            
+                            for kw, freq in keywords_with_freq:
+                                paper_keywords_list.append((paper_id, paper_date, lang, category, kw))
+                                key = (paper_date, lang, category, kw)
+                                stats_map[key] = stats_map.get(key, 0) + freq
                                 
-                        title = paper.get("title", "")
-                        summary = paper.get("summary", "")
-                        
-                        keywords_with_freq = extract_keywords(title, summary)
-                        
-                        for kw, freq in keywords_with_freq:
-                            paper_keywords_list.append((paper_id, paper_date, lang, category, kw))
-                            key = (paper_date, lang, category, kw)
-                            stats_map[key] = stats_map.get(key, 0) + freq
-                            
+                if papers_list:
+                    cursor.executemany(
+                        "INSERT OR REPLACE INTO papers (paper_id, paper_date, language, paper_json) VALUES (?, ?, ?, ?)",
+                        papers_list
+                    )
+                    
                 if paper_keywords_list:
                     cursor.executemany(
                         "INSERT INTO paper_keywords (paper_id, paper_date, language, category, keyword) VALUES (?, ?, ?, ?, ?)",
@@ -294,7 +365,8 @@ def scan_and_process_files():
                     DO UPDATE SET frequency = frequency + excluded.frequency
                     """, stats_insert_data)
                     
-                cursor.execute("INSERT OR REPLACE INTO processed_files (filename) VALUES (?)", (filename,))
+                if not already_processed:
+                    cursor.execute("INSERT OR REPLACE INTO processed_files (filename) VALUES (?)", (filename,))
                 conn.commit()
         finally:
             conn.close()

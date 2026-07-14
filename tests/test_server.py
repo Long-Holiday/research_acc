@@ -192,3 +192,78 @@ def test_stats_apis():
                 pass
         server.ACCESS_PASSWORD = old_password
 
+
+def test_papers_range_api():
+    # Configure fake password
+    import server
+    old_password = server.ACCESS_PASSWORD
+    server.ACCESS_PASSWORD = "testpassword"
+    
+    # Login
+    response = client.post("/api/auth/login", json={"password": "testpassword"})
+    assert response.status_code == 200
+    token = response.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Setup temp data folder for testing
+    os.makedirs("data", exist_ok=True)
+    test_file_1 = "data/2020-07-08_AI_enhanced_Chinese.jsonl"
+    test_file_2 = "data/2020-07-09_AI_enhanced_Chinese.jsonl"
+    
+    with open(test_file_1, "w", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "id": "paper_old",
+            "title": "Old Paper title",
+            "summary": "Old summary",
+            "categories": ["cs.AI"]
+        }) + "\n")
+        
+    with open(test_file_2, "w", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "id": "paper_new",
+            "title": "New Paper title",
+            "summary": "New summary",
+            "categories": ["cs.LG"]
+        }) + "\n")
+        
+    try:
+        # Clear stats database to ensure a clean slate
+        db_path = "data/statistics.db"
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+            except Exception:
+                pass
+
+        # Trigger API papers range for date range containing both
+        response = client.get("/api/papers/range?start_date=2020-07-08&end_date=2020-07-09&lang=Chinese", headers=headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 2
+        
+        ids = [p["id"] for p in data]
+        assert "paper_old" in ids
+        assert "paper_new" in ids
+        
+        # Test out of range
+        response = client.get("/api/papers/range?start_date=2020-07-10&end_date=2020-07-11&lang=Chinese", headers=headers)
+        assert response.status_code == 200
+        assert len(response.json()) == 0
+        
+        # Test invalid parameters
+        response = client.get("/api/papers/range?start_date=2020/07/08&end_date=2020-07-09&lang=Chinese", headers=headers)
+        assert response.status_code == 400
+        
+    finally:
+        if os.path.exists(test_file_1):
+            os.remove(test_file_1)
+        if os.path.exists(test_file_2):
+            os.remove(test_file_2)
+        db_path = "data/statistics.db"
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+            except Exception:
+                pass
+        server.ACCESS_PASSWORD = old_password
+

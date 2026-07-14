@@ -462,33 +462,29 @@ async function loadPapersByDateRange(startDate, endDate) {
   `;
   
   try {
-    // 加载所有日期的论文数据
+    // 加载时间范围内所有论文数据
     const allPaperData = {};
     allPapersData = []; // 重置全局论文数据
     
-    for (const date of validDatesInRange) {
-      const selectedLanguage = selectLanguageForDate(date);
-      const dataUrl = DATA_CONFIG.getPapersUrl(date, selectedLanguage);
-      const response = await Auth.fetchWithAuth(dataUrl);
-      if (!response.ok) {
-        console.warn(`Data for ${date} not found, skipping.`);
-        continue;
-      }
-      const dataPapers = await response.json();
-      if (Array.isArray(dataPapers)) {
-        const normalized = dataPapers.map(p => normalizePaper(p, date));
-        
-        normalized.forEach(paper => {
-          if (paper.category && paper.category.length > 0) {
-            const primaryCategory = paper.category[0];
-            if (!allPaperData[primaryCategory]) {
-              allPaperData[primaryCategory] = [];
-            }
-            allPaperData[primaryCategory].push(paper);
+    const dataUrl = `/api/papers/range?start_date=${startDate}&end_date=${endDate}&lang=${globalLang}`;
+    const response = await Auth.fetchWithAuth(dataUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch papers for range: ${response.statusText}`);
+    }
+    const dataPapers = await response.json();
+    if (Array.isArray(dataPapers)) {
+      const normalized = dataPapers.map(p => normalizePaper(p, p.date));
+      
+      normalized.forEach(paper => {
+        if (paper.category && paper.category.length > 0) {
+          const primaryCategory = paper.category[0];
+          if (!allPaperData[primaryCategory]) {
+            allPaperData[primaryCategory] = [];
           }
-          allPapersData.push(paper);
-        });
-      }
+          allPaperData[primaryCategory].push(paper);
+        }
+        allPapersData.push(paper);
+      });
     }
     
     paperData = allPaperData;
