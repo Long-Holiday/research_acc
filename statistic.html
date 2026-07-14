@@ -11,7 +11,9 @@
     <link rel="stylesheet" href="css/statistic.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3-cloud@1.2.7/build/d3.layout.cloud.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/compromise@14.14.4/builds/compromise.min.js"></script>
@@ -168,6 +170,13 @@
                             <div class="dist-tab-container" style="display: flex; background: var(--bg-secondary, #f1f5f9); padding: 4px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0);">
                                 <button id="btnDistCategory" class="dist-tab-btn active" onclick="changeDistDimension('category')" style="padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; background: var(--card-bg-color, #ffffff); color: var(--text-color, #1e293b); box-shadow: 0 1px 3px rgba(0,0,0,0.1);">按分类 / Category</button>
                                 <button id="btnDistDate" class="dist-tab-btn" onclick="changeDistDimension('date')" style="padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; background: transparent; color: var(--text-secondary, #64748b);">按时间 / Date</button>
+                            </div>
+                            <div style="width: 100%; display: flex; align-items: center; gap: 10px; margin-top: 5px;">
+                                <label for="excludeKeywordsSelect" style="font-size: 13px; font-weight: 600; color: var(--text-color); white-space: nowrap;">排除关键词 / Exclude:</label>
+                                <div style="flex: 1; max-width: 500px;">
+                                    <select id="excludeKeywordsSelect" multiple="multiple" style="display: none;" onchange="updateExcludeKeywords()">
+                                    </select>
+                                </div>
                             </div>
                         </div>
                         <div class="statistics-card" style="position: relative; width: 100%; background: var(--card-bg-color); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); padding: 20px; box-sizing: border-box; margin-bottom: 30px;">

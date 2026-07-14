@@ -682,6 +682,52 @@ async function renderCategoryStats(categories, validDatesInRange) {
     updateDistTabUI(currentDistDimension);
     const dailyTrends = data.daily_trends || [];
     
+    const excludeSelect = document.getElementById('excludeKeywordsSelect');
+    if (excludeSelect) {
+      const choicesData = keywords.slice(0, 100).map(kw => ({
+        value: kw.keyword,
+        label: kw.keyword
+      }));
+      
+      const savedExcludesRaw = localStorage.getItem('excludedKeywords');
+      const savedExcludes = savedExcludesRaw ? JSON.parse(savedExcludesRaw) : [];
+      
+      const choicesSet = new Set(choicesData.map(c => c.value));
+      savedExcludes.forEach(ex => {
+        if (!choicesSet.has(ex)) {
+          choicesData.push({ value: ex, label: ex });
+        }
+      });
+      
+      if (window.excludeChoices) {
+        window.excludeChoices.clearChoices();
+        window.excludeChoices.setChoices(choicesData, 'value', 'label', true);
+        if (savedExcludes.length > 0) {
+          window.excludeChoices.setChoiceByValue(savedExcludes);
+        }
+      } else {
+        excludeSelect.innerHTML = '';
+        choicesData.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.value; opt.textContent = c.label;
+          excludeSelect.appendChild(opt);
+        });
+        window.excludeChoices = new Choices(excludeSelect, {
+          removeItemButton: true,
+          searchPlaceholderValue: 'Search keywords...',
+          placeholderValue: 'Select keywords to exclude',
+          shouldSort: false
+        });
+        
+        if (savedExcludes.length > 0) {
+          window.excludeChoices.setChoiceByValue(savedExcludes);
+        }
+        
+        // Ensure change event triggers chart update
+        excludeSelect.addEventListener('change', updateExcludeKeywords);
+      }
+    }
+    
     if (keywords.length === 0) {
       const noKeywordsHTML = `
         <div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);">
@@ -829,6 +875,17 @@ function updateDistTabUI(dimension) {
   }
 }
 
+function updateExcludeKeywords() {
+  if (window.excludeChoices) {
+    const selectedValues = window.excludeChoices.getValue(true);
+    localStorage.setItem('excludedKeywords', JSON.stringify(selectedValues || []));
+  }
+  
+  if (currentKeywordsData && currentKeywordsData.length > 0) {
+    drawDistributionChart(currentKeywordsData);
+  }
+}
+
 function changeDistDimension(dimension) {
   if (currentDistDimension === dimension) return;
   currentDistDimension = dimension;
@@ -855,9 +912,21 @@ function drawDistributionChart(keywords) {
       return;
     }
 
-    // 选取前 30 个最重要的关键词作为堆叠段以确保图表的可读性与美感
-    const topKeywordsCount = 30;
-    const topKeywords = keywords.slice(0, topKeywordsCount);
+    // 获取被排除的关键词
+    let excludedSet = new Set();
+    const excludeSelect = document.getElementById('excludeKeywordsSelect');
+    if (excludeSelect) {
+      Array.from(excludeSelect.selectedOptions).forEach(opt => {
+        excludedSet.add(opt.value);
+      });
+    }
+
+    // 过滤掉被排除的关键词
+    const filteredKeywords = keywords.filter(kw => !excludedSet.has(kw.keyword));
+
+    // 选取前 60 个最重要的关键词作为堆叠段以确保图表的可读性与美感
+    const topKeywordsCount = 60;
+    const topKeywords = filteredKeywords.slice(0, topKeywordsCount);
 
     let datasets = [];
     let labels = [];
