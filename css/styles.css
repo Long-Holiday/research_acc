@@ -799,7 +799,7 @@ main {
 }
 
 .paper-modal-footer .button.icon-button:not(.primary) {
-  color: var(--text-primary);
+  color: var(--text-color, #1e293b);
 }
 
 .paper-modal-footer .button.icon-button:not(.primary):hover {

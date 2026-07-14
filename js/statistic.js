@@ -24,6 +24,8 @@ let globalStartDate = '';
 let globalEndDate = '';
 let globalLang = 'en';
 let keywordChartInstance = null;
+let currentKeywordsData = [];
+let currentDistDimension = 'category';
 
 // Categories names are displayed directly from data keys to match the main page
 
@@ -542,9 +544,6 @@ function renderCategoryTabs(validDatesInRange) {
         }).join('')}
       </div>
     </div>
-    <div id="categoryStatsContent" class="category-stats-content">
-      <!-- 动态统计内容渲染在这里 -->
-    </div>
   `;
 
   // 3. 绑定 Tab 点击事件
@@ -607,59 +606,68 @@ function renderCategoryTabs(validDatesInRange) {
 }
 
 async function renderCategoryStats(categories, validDatesInRange) {
-  const statsContainer = document.getElementById('categoryStatsContent');
-  if (!statsContainer) return;
-  
   const isAll = categories.includes('All');
   
   const filteredPapers = isAll 
     ? allPapersData 
     : allPapersData.filter(paper => paper.category && categories.includes(paper.category[0]));
      
+  const hotKeywordsList = document.getElementById('hotKeywordsList');
+  const trendChartCard = document.getElementById('trendChartCard');
+  const netContainer = document.getElementById('networkContainer');
+  const distSection = document.getElementById('keywordDistributionSection');
+
+  // 无数据处理
   if (filteredPapers.length === 0) {
-    statsContainer.innerHTML = `
-      <div class="no-data">
+    const noDataHTML = `
+      <div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);">
         <p>当前分类下暂无论文数据 / No papers in this category.</p>
       </div>
     `;
-    const distSection = document.getElementById('keywordDistributionSection');
+    if (hotKeywordsList) hotKeywordsList.innerHTML = noDataHTML;
+    if (trendChartCard) trendChartCard.innerHTML = noDataHTML;
+    if (netContainer) netContainer.innerHTML = noDataHTML;
     if (distSection) distSection.style.display = 'none';
-    const netContainer = document.getElementById('networkContainer');
-    if (netContainer) netContainer.innerHTML = '<div style="padding:20px;text-align:center;">No papers in this category.</div>';
     return;
   }
 
-  // 1. 展示 Loading 状态
-  statsContainer.innerHTML = `
-    <div class="loading-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 200px;">
+  // 1. 展示 Loading 状态，更新分类名称
+  const categoryDisplayName = isAll ? 'All Categories' : categories.join(', ');
+  
+  const hotKeywordsCategoryName = document.getElementById('hotKeywordsCategoryName');
+  if (hotKeywordsCategoryName) hotKeywordsCategoryName.textContent = categoryDisplayName;
+  
+  const trendCategoryName = document.getElementById('trendCategoryName');
+  if (trendCategoryName) trendCategoryName.textContent = categoryDisplayName;
+  
+  const networkCategoryName = document.getElementById('networkCategoryName');
+  if (networkCategoryName) networkCategoryName.textContent = categoryDisplayName;
+  
+  const distributionCategoryName = document.getElementById('distributionCategoryName');
+  if (distributionCategoryName) distributionCategoryName.textContent = categoryDisplayName;
+
+  const loadingSpinnerHTML = `
+    <div class="loading-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 150px; width: 100%;">
       <div class="loading-spinner"></div>
-      <p style="margin-top: 10px; color: var(--text-secondary);">正在加载统计数据 / Loading stats...</p>
+      <p style="margin-top: 10px; color: var(--text-secondary); font-size: 14px;">正在加载 / Loading...</p>
     </div>
   `;
+
+  if (hotKeywordsList) hotKeywordsList.innerHTML = loadingSpinnerHTML;
+  if (trendChartCard) trendChartCard.innerHTML = loadingSpinnerHTML;
+  if (netContainer) netContainer.innerHTML = loadingSpinnerHTML;
   
-  const distSection = document.getElementById('keywordDistributionSection');
   if (distSection) {
       distSection.style.display = 'block';
-      document.getElementById('distributionCategoryName').textContent = isAll ? 'All Categories' : categories.join(', ');
       const canvas = document.getElementById('keywordDistributionChart');
       if (canvas) {
           const ctx = canvas.getContext('2d');
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = '#666';
+          ctx.fillStyle = 'var(--text-secondary, #666)';
           ctx.font = '14px sans-serif';
           ctx.textAlign = 'center';
           ctx.fillText('Loading distribution chart...', canvas.width / 2, canvas.height / 2);
       }
-  }
-
-  const netContainer = document.getElementById('networkContainer');
-  if (netContainer) {
-      netContainer.innerHTML = `
-        <div class="loading-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
-          <div class="loading-spinner"></div>
-          <p style="margin-top: 10px; color: var(--text-secondary);">Loading network...</p>
-        </div>
-      `;
   }
 
   try {
@@ -674,16 +682,20 @@ async function renderCategoryStats(categories, validDatesInRange) {
     
     const data = await response.json();
     const keywords = data.keywords || [];
+    currentKeywordsData = keywords;
+    updateDistTabUI(currentDistDimension);
     const dailyTrends = data.daily_trends || [];
     
     if (keywords.length === 0) {
-      statsContainer.innerHTML = `
-        <div class="no-data">
+      const noKeywordsHTML = `
+        <div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);">
           <p>当前分类下暂无热门关键词 / No keywords found in this category.</p>
         </div>
       `;
+      if (hotKeywordsList) hotKeywordsList.innerHTML = noKeywordsHTML;
+      if (trendChartCard) trendChartCard.innerHTML = noKeywordsHTML;
       if (distSection) distSection.style.display = 'none';
-      if (netContainer) netContainer.innerHTML = '<div style="padding:20px;text-align:center;">No sufficient keyword data.</div>';
+      if (netContainer) netContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);">No sufficient keyword data.</div>';
       return;
     }
 
@@ -712,62 +724,34 @@ async function renderCategoryStats(categories, validDatesInRange) {
       values: values.sort((a, b) => a.date - b.date)
     }));
 
-    const categoryDisplayName = isAll ? 'All Categories (全部)' : categories.join(', ');
     const hasMultipleDates = validDatesInRange.length > 1;
 
-    // 4. 渲染热门列表和折线图卡片
-    statsContainer.innerHTML = `
-      <div class="statistics-section">
-        <h2>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M21.41 11.58L12.41 2.58C12.05 2.22 11.55 2 11 2H4C2.9 2 2 2.9 2 4V11C2 11.55 2.22 12.05 2.59 12.42L11.59 21.42C11.95 21.78 12.45 22 13 22C13.55 22 14.05 21.78 14.41 21.41L21.41 14.41C21.78 14.05 22 13.55 22 13C22 12.45 21.77 11.94 21.41 11.58ZM5.5 7C4.67 7 4 6.33 4 5.5C4 4.67 4.67 4 5.5 4C6.33 4 7 4.67 7 5.5C7 6.33 6.33 7 5.5 7Z" fill="currentColor"/>
-          </svg>
-          热门关键词 - ${categoryDisplayName}
-        </h2>
-        <div class="statistics-card">
-          <div class="keyword-list">
-            ${keywordCloudData.length > 0 ? keywordCloudData.map((item, index) => `
-              <div class="keyword-item" onclick="showRelatedPapers('${escapeHtml(item.text)}')">
-                <span class="keyword-rank">${index + 1}</span>
-                <span class="keyword-text">${escapeHtml(item.text)}</span>
-                <span class="keyword-count">${keywords[index].count}</span>
-              </div>
-            `).join('') : '<p class="no-data">当前分类暂无热门关键词 / No keywords found.</p>'}
-          </div>
+    // 4. 渲染热门关键词列表
+    if (hotKeywordsList) {
+      hotKeywordsList.innerHTML = keywordCloudData.length > 0 ? keywordCloudData.map((item, index) => `
+        <div class="keyword-item" onclick="showRelatedPapers('${escapeHtml(item.text)}')">
+          <span class="keyword-rank">${index + 1}</span>
+          <span class="keyword-text">${escapeHtml(item.text)}</span>
+          <span class="keyword-count">${keywords[index].count}</span>
         </div>
-        
-        ${hasMultipleDates && top10Keywords.length > 0 ? `
-          <h2 class="trend-title">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M3.5 18.5L9.5 12.5L13.5 16.5L22 6.92L20.59 5.5L13.5 13.5L9.5 9.5L2 17L3.5 18.5Z" fill="currentColor"/>
-            </svg>
-            关键词变化趋势 - ${categoryDisplayName}
-          </h2>
-          <div class="statistics-card">
-            <div id="trendChart" style="width: 100%; height: 400px;"></div>
+      `).join('') : '<p class="no-data">当前分类暂无热门关键词 / No keywords found.</p>';
+    }
+    
+    // 渲染折线图趋势
+    if (trendChartCard) {
+      if (hasMultipleDates && top10Keywords.length > 0) {
+        trendChartCard.innerHTML = `<div id="trendChart" style="width: 100%; height: 100%;"></div>`;
+        setTimeout(() => {
+          drawTrendChart(trendData, validDatesInRange);
+        }, 50);
+      } else {
+        trendChartCard.innerHTML = `
+          <div class="no-data" style="text-align: center; color: var(--text-secondary); line-height: 1.6; font-size: 14px; padding: 20px;">
+            📈 暂无趋势图：趋势图需要选择至少两天的数据来进行对比分析。<br>
+            Current selection contains only 1 day of data. Trend chart requires at least 2 days of data.
           </div>
-        ` : `
-          <h2 class="trend-title">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M3.5 18.5L9.5 12.5L13.5 16.5L22 6.92L20.59 5.5L13.5 13.5L9.5 9.5L2 17L3.5 18.5Z" fill="currentColor"/>
-            </svg>
-            关键词变化趋势 - ${categoryDisplayName}
-          </h2>
-          <div class="statistics-card" style="display: flex; justify-content: center; align-items: center; min-height: 200px;">
-            <p class="no-data" style="text-align: center; color: #888; line-height: 1.6; font-size: 14px;">
-              📈 暂无趋势图：趋势图需要选择至少两天的数据来进行对比分析。<br>
-              Current selection contains only 1 day of data. Trend chart requires at least 2 days of data.
-            </p>
-          </div>
-        `}
-      </div>
-    `;
-
-    // 绘制折线图
-    if (hasMultipleDates && top10Keywords.length > 0) {
-      setTimeout(() => {
-        drawTrendChart(trendData, validDatesInRange);
-      }, 50);
+        `;
+      }
     }
 
     // 绘制关键词离散分布水平条形图
@@ -782,6 +766,7 @@ async function renderCategoryStats(categories, validDatesInRange) {
     if (netContainer) {
       setTimeout(async () => {
         try {
+          const categoryParam = isAll ? 'All' : categories.join(',');
           const networkUrl = `/api/stats/network?start_date=${globalStartDate}&end_date=${globalEndDate}&lang=${globalLang}&category=${categoryParam}`;
           const netResponse = await Auth.fetchWithAuth(networkUrl);
           if (!netResponse.ok) throw new Error("Failed to fetch network data");
@@ -789,101 +774,266 @@ async function renderCategoryStats(categories, validDatesInRange) {
           renderNetwork(networkData);
         } catch (netErr) {
           console.error("加载网络图失败:", netErr);
-          netContainer.innerHTML = `<div style="padding:20px;text-align:center;color:red;">加载网络图失败 / Failed to load network: ${netErr.message}</div>`;
+          netContainer.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-secondary);">加载网络图失败 / Failed to load network: ${netErr.message}</div>`;
         }
       }, 50);
     }
 
   } catch (error) {
     console.error('加载统计数据失败:', error);
-    statsContainer.innerHTML = `
+    const errorHTML = `
       <div class="error" style="padding: 20px; text-align: center; color: #e74c3c;">
         <p>加载统计数据失败 / Failed to load statistics.</p>
         <p>错误信息: ${error.message}</p>
       </div>
     `;
+    if (hotKeywordsList) hotKeywordsList.innerHTML = errorHTML;
+    if (trendChartCard) trendChartCard.innerHTML = errorHTML;
     if (distSection) distSection.style.display = 'none';
     if (netContainer) netContainer.innerHTML = '<div style="padding:20px;text-align:center;color:red;">加载共现网络失败。</div>';
   }
 }
 
-function drawDistributionChart(keywords) {
-  const canvas = document.getElementById('keywordDistributionChart');
-  if (!canvas) return;
-
-  // 销毁旧实例
-  if (keywordChartInstance) {
-    keywordChartInstance.destroy();
-    keywordChartInstance = null;
+function getPalette(count) {
+  // 高质量的多色分类调色板，确保 15+ 个关键词在堆叠图中有极佳的视觉对比度与现代质感
+  const baseColors = [
+    '#6366f1', '#10b981', '#f43f5e', '#eab308', '#3b82f6', 
+    '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#a855f7',
+    '#06b6d4', '#84cc16', '#22c55e', '#ef4444', '#0284c7',
+    '#b45309', '#be185d', '#6d28d9', '#0369a1', '#15803d'
+  ];
+  if (count <= baseColors.length) {
+    return baseColors.slice(0, count);
   }
+  const colors = [...baseColors];
+  for (let i = baseColors.length; i < count; i++) {
+    const hue = Math.round(((i - baseColors.length) * 360) / (count - baseColors.length)) % 360;
+    colors.push(`hsl(${hue}, 70%, 55%)`);
+  }
+  return colors;
+}
 
-  // 选取前 30-50 个关键词，这里我们选取 35 个
-  const chartData = keywords.slice(0, 35);
-  const labels = chartData.map(d => d.keyword);
-  const counts = chartData.map(d => d.count);
-
-  const ctx = canvas.getContext('2d');
+function updateDistTabUI(dimension) {
+  const btnCategory = document.getElementById('btnDistCategory');
+  const btnDate = document.getElementById('btnDistDate');
+  if (!btnCategory || !btnDate) return;
   
-  // 设置渐变色以匹配系统的蓝色/靛蓝色主题
-  const gradient = ctx.createLinearGradient(0, 0, canvas.width || 500, 0);
-  gradient.addColorStop(0, '#667eea');
-  gradient.addColorStop(1, '#764ba2');
+  if (dimension === 'category') {
+    btnCategory.style.background = 'var(--card-bg-color, #ffffff)';
+    btnCategory.style.color = 'var(--text-color, #1e293b)';
+    btnCategory.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+    
+    btnDate.style.background = 'transparent';
+    btnDate.style.color = 'var(--text-secondary, #64748b)';
+    btnDate.style.boxShadow = 'none';
+  } else {
+    btnDate.style.background = 'var(--card-bg-color, #ffffff)';
+    btnDate.style.color = 'var(--text-color, #1e293b)';
+    btnDate.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+    
+    btnCategory.style.background = 'transparent';
+    btnCategory.style.color = 'var(--text-secondary, #64748b)';
+    btnCategory.style.boxShadow = 'none';
+  }
+}
 
-  keywordChartInstance = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'Frequency (出现频次)',
-        data: counts,
-        backgroundColor: gradient,
-        borderColor: '#667eea',
-        borderWidth: 1,
-        borderRadius: 4,
-        barPercentage: 0.7,
-        categoryPercentage: 0.8
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          display: false
-        },
-        tooltip: {
-          backgroundColor: 'rgba(30, 41, 59, 0.9)',
-          titleFont: { size: 13, weight: 'bold' },
-          bodyFont: { size: 12 },
-          padding: 10,
-          cornerRadius: 6,
-          displayColors: false
-        }
+function changeDistDimension(dimension) {
+  if (currentDistDimension === dimension) return;
+  currentDistDimension = dimension;
+  updateDistTabUI(dimension);
+  
+  if (currentKeywordsData && currentKeywordsData.length > 0) {
+    drawDistributionChart(currentKeywordsData);
+  }
+}
+
+function drawDistributionChart(keywords) {
+  try {
+    const canvas = document.getElementById('keywordDistributionChart');
+    if (!canvas) return;
+
+    // 销毁旧实例
+    if (keywordChartInstance) {
+      keywordChartInstance.destroy();
+      keywordChartInstance = null;
+    }
+
+    if (!keywords || keywords.length === 0) {
+      console.warn('drawDistributionChart: keywords array is empty');
+      return;
+    }
+
+    // 选取前 15 个最重要的关键词作为堆叠段以确保图表的可读性与美感
+    const topKeywordsCount = 15;
+    const topKeywords = keywords.slice(0, topKeywordsCount);
+
+    let datasets = [];
+    let labels = [];
+    const dimension = currentDistDimension;
+
+    // 1. 收集分类或日期列表作为 Y 轴 labels
+    if (dimension === 'category') {
+      const catsSet = new Set();
+      keywords.forEach(d => {
+        const dist = d.category_distribution || {};
+        Object.keys(dist).forEach(cat => {
+          if (cat && cat.trim() !== '') {
+            catsSet.add(cat);
+          }
+        });
+      });
+      labels = Array.from(catsSet).sort();
+    } else {
+      const datesSet = new Set();
+      keywords.forEach(d => {
+        const dist = d.date_distribution || {};
+        Object.keys(dist).forEach(date => {
+          if (date && date.trim() !== '') {
+            datesSet.add(date);
+          }
+        });
+      });
+      labels = Array.from(datesSet).sort();
+    }
+
+    // 2. 计算每个 label 下前 15 个关键词的频次总和，用于计算百分比
+    const labelTotals = {};
+    labels.forEach(label => {
+      let total = 0;
+      topKeywords.forEach(kwObj => {
+        const dist = (dimension === 'category') 
+          ? (kwObj.category_distribution || {}) 
+          : (kwObj.date_distribution || {});
+        total += dist[label] || 0;
+      });
+      labelTotals[label] = total;
+    });
+
+    // 3. 构建 100% 堆叠条形图所需的 datasets 占比数据
+    const colors = getPalette(topKeywords.length);
+    datasets = topKeywords.map((kwObj, index) => {
+      const dist = (dimension === 'category') 
+        ? (kwObj.category_distribution || {}) 
+        : (kwObj.date_distribution || {});
+
+      const data = labels.map(label => {
+        const total = labelTotals[label] || 0;
+        const val = dist[label] || 0;
+        if (total === 0) return 0;
+        return parseFloat(((val / total) * 100).toFixed(1));
+      });
+
+      return {
+        label: kwObj.keyword,
+        data: data,
+        backgroundColor: colors[index],
+        borderWidth: 0
+      };
+    });
+
+    // 4. 动态调整 Canvas 容器高度以适应不同长度的 labels
+    const container = canvas.parentElement;
+    if (container) {
+      const calculatedHeight = Math.max(450, labels.length * 38 + 120);
+      container.style.height = `${calculatedHeight}px`;
+    }
+
+    const ctx = canvas.getContext('2d');
+    
+    keywordChartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: datasets
       },
-      scales: {
-        x: {
-          grid: {
-            color: 'rgba(226, 232, 240, 0.1)',
-            borderColor: 'rgba(226, 232, 240, 0.2)'
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top',
+            labels: {
+              color: '#1e293b',
+              boxWidth: 12,
+              font: {
+                size: 14,
+                weight: '500'
+              }
+            }
           },
-          ticks: {
-            color: '#475569',
-            font: { size: 11 }
+          tooltip: {
+            backgroundColor: 'rgba(15, 23, 42, 0.9)',
+            titleFont: { size: 13, weight: 'bold' },
+            bodyFont: { size: 12 },
+            padding: 10,
+            cornerRadius: 6,
+            mode: 'nearest',
+            intersect: true,
+            axis: 'xy',
+            callbacks: {
+              label: function(context) {
+                let label = context.dataset.label || '';
+                if (label) {
+                  label += ': ';
+                }
+                if (context.parsed.x !== null) {
+                  label += context.parsed.x + '%';
+                }
+                return label;
+              }
+            }
           }
         },
-        y: {
-          grid: {
-            display: false
+        scales: {
+          x: {
+            stacked: true,
+            max: 100, // 固定最大值为 100%
+            grid: {
+              color: 'rgba(226, 232, 240, 0.1)',
+              borderColor: 'rgba(226, 232, 240, 0.2)'
+            },
+            ticks: {
+              color: '#475569',
+              font: { size: 13 },
+              callback: function(value) {
+                return value + '%'; // 刻度显示百分比后缀
+              }
+            }
           },
-          ticks: {
-            color: '#1e293b',
-            font: { size: 12, weight: '500' }
+          y: {
+            stacked: true,
+            grid: {
+              display: false
+            },
+            ticks: {
+              color: '#1e293b',
+              font: { size: 14, weight: '500' }
+            }
           }
         }
       }
+    });
+  } catch (err) {
+    console.error('drawDistributionChart error:', err);
+    const canvas = document.getElementById('keywordDistributionChart');
+    if (canvas && canvas.parentElement) {
+      canvas.parentElement.innerHTML = `
+        <div style="color: #ef4444; padding: 20px; border: 1px dashed #fca5a5; background-color: #fef2f2; border-radius: 8px; font-family: system-ui, sans-serif; margin-bottom: 20px;">
+          <h3 style="margin-top: 0; display: flex; align-items: center; gap: 8px;">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+            </svg>
+            图表渲染失败 / Chart Render Error
+          </h3>
+          <p style="font-weight: 600; margin-bottom: 8px;">${err.message}</p>
+          <pre style="margin: 0; padding: 12px; background: #fee2e2; border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; color: #991b1b;">${err.stack}</pre>
+        </div>
+      `;
     }
-  });
+  }
+}
 
 function drawTrendChart(trendData, validDatesInRange) {
   const chartElement = document.getElementById('trendChart');
@@ -1302,8 +1452,13 @@ function renderNetwork(dataOrPapers) {
             g.attr("transform", event.transform);
         }));
 
-    // Color scale
-    const color = d3.scaleOrdinal(d3.schemeCategory10);
+    // Color scale using the unified theme palette
+    const themeColors = [
+      '#6366f1', '#10b981', '#f43f5e', '#eab308', '#3b82f6', 
+      '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#a855f7',
+      '#06b6d4', '#84cc16', '#22c55e', '#ef4444', '#0284c7'
+    ];
+    const color = d3.scaleOrdinal(themeColors);
     
     // Size scale
     const sizeScale = d3.scaleSqrt()
@@ -1369,7 +1524,7 @@ function renderNetwork(dataOrPapers) {
             .style("top", (event.pageY - 28) + "px");
     }).on("mouseout", () => {
         node.style("opacity", 1);
-        link.style("stroke-opacity", 0.6);
+        link.style("stroke-opacity", 0.8);
         label.style("opacity", 1);
         tooltip.transition().duration(500).style("opacity", 0);
     }).on("click", (event, d) => {

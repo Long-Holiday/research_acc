@@ -328,44 +328,49 @@ def get_keyword_stats(
         cursor = conn.cursor()
         
         cursor.execute("""
-        SELECT keyword, SUM(frequency) as total
+        SELECT keyword, category, paper_date, SUM(frequency) as count
         FROM keyword_stats
         WHERE paper_date BETWEEN ? AND ?
           AND language = ?
           AND (? = 'All' OR category = ?)
-        GROUP BY keyword
-        ORDER BY total DESC
-        LIMIT 100
+        GROUP BY keyword, category, paper_date
         """, (start_date, end_date, lang, category, category))
         
-        keywords_rows = cursor.fetchall()
-        keywords_list = [{"keyword": row[0], "count": row[1]} for row in keywords_rows]
+        rows = cursor.fetchall()
+        
+        keyword_data = {}
+        for keyword, cat, p_date, count in rows:
+            if keyword not in keyword_data:
+                keyword_data[keyword] = {
+                    "keyword": keyword,
+                    "count": 0,
+                    "category_distribution": {},
+                    "date_distribution": {}
+                }
+            
+            entry = keyword_data[keyword]
+            entry["count"] += count
+            entry["category_distribution"][cat] = entry["category_distribution"].get(cat, 0) + count
+            entry["date_distribution"][p_date] = entry["date_distribution"].get(p_date, 0) + count
+            
+        # 转换为列表并按 count 降序排序
+        keywords_list = sorted(keyword_data.values(), key=lambda x: x["count"], reverse=True)
+        # 限制返回 100 个
+        keywords_list = keywords_list[:100]
         
         daily_trends = []
         top_10_keywords = [item["keyword"] for item in keywords_list[:10]]
+        for kw in top_10_keywords:
+            if kw in keyword_data:
+                for p_date, count in keyword_data[kw]["date_distribution"].items():
+                    daily_trends.append({
+                        "keyword": kw,
+                        "date": p_date,
+                        "count": count
+                    })
+        # 按照 date 排序，保证前端折线图渲染时日期有序
+        daily_trends.sort(key=lambda x: x["date"])
         
-        if top_10_keywords:
-            placeholders = ",".join(["?"] * len(top_10_keywords))
-            sql = f"""
-            SELECT keyword, paper_date, SUM(frequency) as count
-            FROM keyword_stats
-            WHERE paper_date BETWEEN ? AND ?
-              AND language = ?
-              AND (? = 'All' OR category = ?)
-              AND keyword IN ({placeholders})
-            GROUP BY keyword, paper_date
-            ORDER BY paper_date ASC
-            """
-            params = [start_date, end_date, lang, category, category] + top_10_keywords
-            cursor.execute(sql, params)
-            
-            trends_rows = cursor.fetchall()
-            daily_trends = [{
-                "keyword": row[0],
-                "date": row[1],
-                "count": row[2]
-            } for row in trends_rows]
-            
         return {
             "keywords": keywords_list,
             "daily_trends": daily_trends
