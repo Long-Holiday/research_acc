@@ -16,8 +16,8 @@ cd "$(dirname "$0")"
 # 获取项目的绝对路径
 PROJECT_DIR="$(pwd)"
 
-# Cron 定时任务配置 (每天凌晨 1:11 自动执行)
-CRON_SCHEDULE="11 1 * * *"
+# Cron 定时任务配置 (每天凌晨 1:31 自动执行)
+CRON_SCHEDULE="31 1 * * *"
 CRON_IDENTIFIER="PROJECT_IDENTIFIER=daily_arxiv_crawl"
 CRON_LINE="$CRON_SCHEDULE export PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin && cd $PROJECT_DIR && $CRON_IDENTIFIER ./run.sh >> $PROJECT_DIR/cron_crawl.log 2>&1"
 
@@ -31,7 +31,7 @@ add_cron() {
         chmod +x ./run.sh
         # 添加至 crontab
         (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
-        echo "定时任务 (cron) 已成功添加到系统 crontab 中 (每天 20:11 自动执行)。"
+        echo "定时任务 (cron) 已成功添加到系统 crontab 中 (每天 1:31 自动执行)。"
     fi
 }
 

@@ -213,69 +213,7 @@ header {
   font-weight: 600;
 }
 
-.github-button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 24px;
-  background: var(--gradient-primary);
-  color: white;
-  font-size: 14px;
-  font-weight: 500;
-  transition: var(--transition);
-  text-decoration: none !important;
-  box-shadow: var(--shadow-sm);
-}
 
-.github-button:hover {
-  background: var(--gradient-primary);
-  text-decoration: none !important;
-  transform: translateY(-1px);
-  color: white;
-  box-shadow: var(--shadow-md);
-}
-
-.github-button svg {
-  fill: white;
-}
-
-.github-text {
-  font-weight: 500;
-}
-
-.github-stats {
-  display: flex;
-  gap: 6px;
-}
-
-.star-badge,
-.fork-badge {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background-color: rgba(255, 255, 255, 0.25);
-  border-radius: 12px;
-  padding: 4px 8px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.star-badge svg {
-  fill: white;
-  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.3));
-}
-
-.fork-badge svg {
-  fill: white;
-  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.3));
-}
-
-.star-count,
-.fork-count {
-  color: white;
-  font-weight: 600;
-}
 
 .header-controls {
   display: flex;
@@ -2275,46 +2213,7 @@ footer {
   }
 }
 
-/* GitHub Link Styles */
-.github-link {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  background-color: #f6f8fa;
-  color: #24292f;
-  border: 1px solid rgba(27, 31, 36, 0.15);
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  margin-left: 10px;
-  transition: all 0.2s ease;
-  text-decoration: none;
-}
 
-.github-link:hover {
-  background-color: #f3f4f6;
-  text-decoration: none;
-  border-color: rgba(27, 31, 36, 0.15);
-}
-
-.github-link.hot-repo {
-  /* background-color: #fff8c5;  Removed yellow background */
-  border-color: rgba(27, 31, 36, 0.15);
-  color: #24292f;
-}
-
-.github-link.outdated-repo {
-  /* opacity: 0.7; Removed opacity */
-}
-
-.github-stars {
-  margin-left: 4px;
-  color: #57606a;
-}
-
-.hot-icon {
-  margin-left: 4px;
-}
 
 .warning-icon {
   margin-left: 4px;

@@ -13,6 +13,7 @@ import sys
 import os
 import argparse
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 def load_papers_data(file_path):
     """
@@ -75,7 +76,7 @@ def perform_deduplication(target_date=None):
     """
 
     if target_date is None:
-        target_date_obj = datetime.now()
+        target_date_obj = datetime.now(ZoneInfo("UTC"))
     else:
         try:
             target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")

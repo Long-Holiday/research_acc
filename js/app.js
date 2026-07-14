@@ -378,8 +378,6 @@ function matchPapersByKeywordsOrAuthor(papers, keywords, author) {
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
 
-  fetchGitHubStats();
-
   // 加载用户关键词
   loadUserKeywords();
 
@@ -399,21 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-async function fetchGitHubStats() {
-  try {
-    const response = await fetch('https://api.github.com/repos/dw-dengwei/daily-arXiv-ai-enhanced');
-    const data = await response.json();
-    const starCount = data.stargazers_count;
-    const forkCount = data.forks_count;
-    
-    document.getElementById('starCount').textContent = starCount;
-    document.getElementById('forkCount').textContent = forkCount;
-  } catch (error) {
-    console.error('获取GitHub统计数据失败:', error);
-    document.getElementById('starCount').textContent = '?';
-    document.getElementById('forkCount').textContent = '?';
-  }
-}
+
 
 function initEventListeners() {
   // 日期选择器相关的事件监听
@@ -1285,22 +1269,7 @@ function renderPapers() {
     // 格式化作者列表（应用截断规则和高亮）
     const formattedAuthors = formatAuthorsForCard(paper.authors, authorTerms);
     
-    // 构建 GitHub 按钮 HTML
-    // let githubHtml = '';
-    // if (paper.code_url) {
-    //   const stars = paper.code_stars ? `<span class="github-stars">★ ${paper.code_stars}</span>` : '';
-    //   const isHot = paper.code_stars > 100;
-      
-    //   githubHtml = `
-    //     <a href="${paper.code_url}" target="_blank" class="github-link" title="View Code" onclick="event.stopPropagation()">
-    //       <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px;">
-    //         <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
-    //       </svg>
-    //       Code ${stars}
-    //       ${isHot ? '<span class="hot-icon">🔥</span>' : ''}
-    //     </a>
-    //   `;
-    // }
+
 
     paperCard.innerHTML = `
       <div class="paper-card-index">${index + 1}</div>
@@ -1463,17 +1432,7 @@ function showPaperDetails(paper, paperIndex) {
   document.getElementById('pdfLink').href = paper.url.replace('abs', 'pdf');
   document.getElementById('htmlLink').href = paper.url.replace('abs', 'html');
   
-  // --- GitHub Button Logic ---
-  const githubLink = document.getElementById('githubLink');
-  
-  if (paper.code_url) {
-    githubLink.href = paper.code_url;
-    githubLink.style.display = 'flex'; 
-    githubLink.title = "View Code on GitHub";
-  } else {
-    githubLink.style.display = 'none';
-  }
-  // ---------------------------
+
 
   // 提示词来自：https://papers.cool/
   prompt = `请你阅读这篇文章${paper.url.replace('abs', 'pdf')},总结一下这篇文章解决的问题、相关工作、研究方法、做了什么实验及其结果、结论，最后整体总结一下这篇文章的内容`

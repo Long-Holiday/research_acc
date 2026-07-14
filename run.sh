@@ -12,12 +12,6 @@ fi
 
 # 环境变量检查和提示 / Environment variables check and prompt
 echo "=== 本地调试环境检查 / Local Debug Environment Check ==="
-if [ -z "$TOKEN_GITHUB" ]; then
-    echo "⚠️  提示：未设置 TOKEN_GITHUB / Warning: TOKEN_GITHUB not set"
-    echo "可能导致 GitHub 相关功能受限 / May limit GitHub related functionalities"
-else
-    echo "✅ TOKEN_GITHUB 已设置 / TOKEN_GITHUB is set"
-fi
 
 # 检查必需的环境变量 / Check required environment variables
 if [ -z "$OPENAI_API_KEY" ] && [ -z "$GOOGLE_API_KEY" ]; then
@@ -83,7 +77,7 @@ if [ -d ".venv" ]; then
 fi
 
 # 获取当前日期 / Get current date
-today=`date -u "+%Y-%m-%d"`
+today=$(TZ='UTC' date "+%Y-%m-%d")
 
 echo "本地测试：爬取 $today 的arXiv论文... / Local test: Crawling $today arXiv papers..."
 

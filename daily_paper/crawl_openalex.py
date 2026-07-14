@@ -3,6 +3,7 @@ import sys
 import json
 import argparse
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 # Ensure the current directory is in sys.path for local package resolution
@@ -42,7 +43,7 @@ def main():
         if args.date:
             today_dt = datetime.strptime(args.date, "%Y-%m-%d")
         else:
-            today_dt = datetime.now(timezone.utc)
+            today_dt = datetime.now(ZoneInfo("UTC"))
         yesterday_dt = today_dt - timedelta(days=1)
         yesterday_str = yesterday_dt.strftime("%Y-%m-%d")
         from_dt = today_dt - timedelta(days=7)
