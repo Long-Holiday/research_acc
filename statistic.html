@@ -116,14 +116,30 @@
 
                     <!-- 热门关键词独占一行 -->
                     <div class="statistics-section" id="hotKeywordsSection" style="margin-top: 30px;">
-                        <h2>
+                        <h2 style="margin-bottom: 20px;">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M21.41 11.58L12.41 2.58C12.05 2.22 11.55 2 11 2H4C2.9 2 2 2.9 2 4V11C2 11.55 2.22 12.05 2.59 12.42L11.59 21.42C11.95 21.78 12.45 22 13 22C13.55 22 14.05 21.78 14.41 21.41L21.41 14.41C21.78 14.05 22 13.55 22 13C22 12.45 21.77 11.94 21.41 11.58ZM5.5 7C4.67 7 4 6.33 4 5.5C4 4.67 4.67 4 5.5 4C6.33 4 7 4.67 7 5.5C7 6.33 6.33 7 5.5 7Z" fill="currentColor"/>
                             </svg>
                             热门关键词 - <span id="hotKeywordsCategoryName">All Categories</span>
                         </h2>
-                        <div class="statistics-card">
-                            <div class="keyword-list" id="hotKeywordsList" style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; min-height: 80px;">
+                        <div class="statistics-card" style="padding: 24px;">
+                            <!-- 排除关键词过滤组件 -->
+                            <div class="exclude-section-container" style="margin-bottom: 24px;">
+                                <div class="exclude-subtitle" style="font-size: 13.5px; font-weight: 600; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: #94a3b8;">
+                                        <path d="M3 4C3 3.44772 3.44772 3 4 3H20C20.5523 3 21 3.44772 21 4V6.58579C21 6.851 20.8946 7.10536 20.7071 7.29289L14.2929 13.7071C14.1054 13.8946 14 14.149 14 14.4142V19.5528C14 19.8809 13.6393 20.0767 13.3618 19.9033L10.3618 18.0283C10.136 17.8872 10 17.6391 10 17.3739V14.4142C10 14.149 9.89464 13.8946 9.70711 13.7071L3.29289 7.29289C3.10536 7.10536 3 6.851 3 6.58579V4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    Select keywords to exclude
+                                </div>
+                                <div class="global-exclude-wrapper">
+                                    <div class="exclude-input-container">
+                                        <select id="excludeKeywordsSelect" multiple="multiple" style="display: none;" onchange="updateExcludeKeywords()">
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="keyword-list" id="hotKeywordsList" style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-start; align-items: center; min-height: 80px;">
                                 <!-- 动态插入热门关键词 -->
                             </div>
                         </div>
@@ -170,13 +186,6 @@
                             <div class="dist-tab-container" style="display: flex; background: var(--bg-secondary, #f1f5f9); padding: 4px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0);">
                                 <button id="btnDistCategory" class="dist-tab-btn active" onclick="changeDistDimension('category')" style="padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; background: var(--card-bg-color, #ffffff); color: var(--text-color, #1e293b); box-shadow: 0 1px 3px rgba(0,0,0,0.1);">按分类 / Category</button>
                                 <button id="btnDistDate" class="dist-tab-btn" onclick="changeDistDimension('date')" style="padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; background: transparent; color: var(--text-secondary, #64748b);">按时间 / Date</button>
-                            </div>
-                            <div style="width: 100%; display: flex; align-items: center; gap: 10px; margin-top: 5px;">
-                                <label for="excludeKeywordsSelect" style="font-size: 13px; font-weight: 600; color: var(--text-color); white-space: nowrap;">排除关键词 / Exclude:</label>
-                                <div style="flex: 1; max-width: 500px;">
-                                    <select id="excludeKeywordsSelect" multiple="multiple" style="display: none;" onchange="updateExcludeKeywords()">
-                                    </select>
-                                </div>
                             </div>
                         </div>
                         <div class="statistics-card" style="position: relative; width: 100%; background: var(--card-bg-color); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); padding: 20px; box-sizing: border-box; margin-bottom: 30px;">

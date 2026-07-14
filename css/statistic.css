@@ -1231,3 +1231,83 @@ input:checked + .toggle-slider:before {
     background-color: transparent;
     color: var(--text-color);
 }
+
+/* Global Exclude Section Choices.js Customization */
+.global-exclude-wrapper {
+    display: flex;
+    align-items: flex-start;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 6px 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    transition: all 0.2s ease;
+}
+.global-exclude-wrapper:focus-within, .global-exclude-wrapper:hover {
+    border-color: var(--primary-color, #667eea);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+.exclude-section-container:focus-within .exclude-subtitle {
+    color: var(--primary-color, #667eea) !important;
+}
+.exclude-section-container:focus-within .exclude-subtitle svg {
+    color: var(--primary-color, #667eea) !important;
+}
+.global-exclude-wrapper .exclude-input-container {
+    flex: 1;
+    min-width: 0;
+}
+.global-exclude-wrapper .choices {
+    margin-bottom: 0;
+}
+.global-exclude-wrapper .choices[data-type*="select-multiple"] .choices__inner {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    min-height: 32px !important;
+    box-shadow: none !important;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.global-exclude-wrapper .choices__list--multiple .choices__item {
+    background-color: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #475569;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-weight: 500;
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    transition: all 0.2s;
+}
+.global-exclude-wrapper .choices__list--multiple .choices__item:hover,
+.global-exclude-wrapper .choices__list--multiple .choices__item.is-highlighted {
+    background-color: #e2e8f0;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+.global-exclude-wrapper .choices[data-type*="select-multiple"] .choices__button {
+    border-left: 1px solid #cbd5e1;
+    margin-left: 6px;
+    padding-left: 6px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+.global-exclude-wrapper .choices__list--multiple .choices__item:hover .choices__button {
+    opacity: 1;
+}
+.global-exclude-wrapper .choices__input {
+    background: transparent !important;
+    color: #334155;
+    font-size: 14px;
+    margin-bottom: 0;
+    padding: 4px 0;
+    min-width: 120px;
+}
+.global-exclude-wrapper .choices__input::placeholder {
+    color: #94a3b8;
+}

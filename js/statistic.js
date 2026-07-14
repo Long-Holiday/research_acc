@@ -677,14 +677,15 @@ async function renderCategoryStats(categories, validDatesInRange) {
     }
     
     const data = await response.json();
-    const keywords = data.keywords || [];
-    currentKeywordsData = keywords;
+    currentKeywordsData = data.keywords || [];
+    window.currentDailyTrends = data.daily_trends || [];
+    window.currentValidDatesInRange = validDatesInRange;
+    
     updateDistTabUI(currentDistDimension);
-    const dailyTrends = data.daily_trends || [];
     
     const excludeSelect = document.getElementById('excludeKeywordsSelect');
     if (excludeSelect) {
-      const choicesData = keywords.slice(0, 100).map(kw => ({
+      const choicesData = currentKeywordsData.slice(0, 100).map(kw => ({
         value: kw.keyword,
         label: kw.keyword
       }));
@@ -715,7 +716,7 @@ async function renderCategoryStats(categories, validDatesInRange) {
         window.excludeChoices = new Choices(excludeSelect, {
           removeItemButton: true,
           searchPlaceholderValue: 'Search keywords...',
-          placeholderValue: 'Select keywords to exclude',
+          placeholderValue: 'Search keywords...',
           shouldSort: false
         });
         
@@ -728,7 +729,7 @@ async function renderCategoryStats(categories, validDatesInRange) {
       }
     }
     
-    if (keywords.length === 0) {
+    if (currentKeywordsData.length === 0) {
       const noKeywordsHTML = `
         <div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);">
           <p>当前分类下暂无热门关键词 / No keywords found in this category.</p>
@@ -741,79 +742,18 @@ async function renderCategoryStats(categories, validDatesInRange) {
       return;
     }
 
-    // 准备热门关键词列表数据 (前 30 个)
-    const keywordCloudData = keywords.slice(0, 30).map(item => ({
-      text: item.keyword,
-      size: Math.max(12, Math.min(50, item.count * 3))
-    }));
-
-    // 3. 准备折线图数据 (trendData)
-    const top10Keywords = keywords.slice(0, 10).map(d => d.keyword);
-    const trendMap = new Map();
-    top10Keywords.forEach(k => trendMap.set(k, []));
-    
-    dailyTrends.forEach(item => {
-      if (trendMap.has(item.keyword)) {
-        trendMap.get(item.keyword).push({
-          date: new Date(item.date + 'T00:00:00Z'),
-          count: item.count
-        });
-      }
-    });
-    
-    const trendData = Array.from(trendMap.entries()).map(([keyword, values]) => ({
-      keyword: keyword,
-      values: values.sort((a, b) => a.date - b.date)
-    }));
-
-    const hasMultipleDates = validDatesInRange.length > 1;
-
-    // 4. 渲染热门关键词列表
-    if (hotKeywordsList) {
-      hotKeywordsList.innerHTML = keywordCloudData.length > 0 ? keywordCloudData.map((item, index) => `
-        <div class="keyword-item" onclick="showRelatedPapers('${escapeHtml(item.text)}')">
-          <span class="keyword-rank">${index + 1}</span>
-          <span class="keyword-text">${escapeHtml(item.text)}</span>
-          <span class="keyword-count">${keywords[index].count}</span>
-        </div>
-      `).join('') : '<p class="no-data">当前分类暂无热门关键词 / No keywords found.</p>';
-    }
-    
-    // 渲染折线图趋势
-    if (trendChartCard) {
-      if (hasMultipleDates && top10Keywords.length > 0) {
-        trendChartCard.innerHTML = `<div id="trendChart" style="width: 100%; height: 100%;"></div>`;
-        setTimeout(() => {
-          drawTrendChart(trendData, validDatesInRange);
-        }, 50);
-      } else {
-        trendChartCard.innerHTML = `
-          <div class="no-data" style="text-align: center; color: var(--text-secondary); line-height: 1.6; font-size: 14px; padding: 20px;">
-            📈 暂无趋势图：趋势图需要选择至少两天的数据来进行对比分析。<br>
-            Current selection contains only 1 day of data. Trend chart requires at least 2 days of data.
-          </div>
-        `;
-      }
-    }
-
-    // 绘制关键词离散分布水平条形图
-    if (distSection) {
-      distSection.style.display = 'block';
-      setTimeout(() => {
-        drawDistributionChart(keywords);
-      }, 50);
-    }
+    // Call updateCharts to render hot keywords, trend chart, and distribution
+    updateCharts();
 
     // 5. 加载并渲染网络图
     if (netContainer) {
       setTimeout(async () => {
         try {
-          const categoryParam = isAll ? 'All' : categories.join(',');
           const networkUrl = `/api/stats/network?start_date=${encodeURIComponent(globalStartDate)}&end_date=${encodeURIComponent(globalEndDate)}&lang=${encodeURIComponent(globalLang)}&category=${encodeURIComponent(categoryParam)}`;
           const netResponse = await Auth.fetchWithAuth(networkUrl);
           if (!netResponse.ok) throw new Error("Failed to fetch network data");
-          const networkData = await netResponse.json();
-          renderNetwork(networkData);
+          window.currentNetworkData = await netResponse.json();
+          updateCharts(); // Re-render to include network
         } catch (netErr) {
           console.error("加载网络图失败:", netErr);
           netContainer.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-secondary);">加载网络图失败 / Failed to load network: ${netErr.message}</div>`;
@@ -881,8 +821,105 @@ function updateExcludeKeywords() {
     localStorage.setItem('excludedKeywords', JSON.stringify(selectedValues || []));
   }
   
-  if (currentKeywordsData && currentKeywordsData.length > 0) {
-    drawDistributionChart(currentKeywordsData);
+  if (window.updateCharts) {
+    window.updateCharts();
+  }
+}
+
+window.updateCharts = function() {
+  if (!currentKeywordsData) return;
+
+  const savedExcludesRaw = localStorage.getItem('excludedKeywords');
+  const savedExcludes = savedExcludesRaw ? JSON.parse(savedExcludesRaw) : [];
+  const excludedSet = new Set(savedExcludes);
+
+  const keywords = currentKeywordsData.filter(kw => !excludedSet.has(kw.keyword));
+
+  const hotKeywordsList = document.getElementById('hotKeywordsList');
+  if (keywords.length === 0) {
+      if (hotKeywordsList) hotKeywordsList.innerHTML = '<div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);"><p>暂无关键词 / No keywords found after filtering.</p></div>';
+      const trendChartCard = document.getElementById('trendChartCard');
+      if (trendChartCard) trendChartCard.innerHTML = '<div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);"><p>暂无趋势图 / No trend data after filtering.</p></div>';
+      const distSection = document.getElementById('keywordDistributionSection');
+      if (distSection) distSection.style.display = 'none';
+      const netContainer = document.getElementById('networkContainer');
+      if (netContainer) netContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);">暂无网络图 / No network data after filtering.</div>';
+      return;
+  }
+
+  // 1. Hot Keywords
+  const keywordCloudData = keywords.slice(0, 30).map(item => ({
+    text: item.keyword,
+    size: Math.max(12, Math.min(50, item.count * 3))
+  }));
+
+  if (hotKeywordsList) {
+    hotKeywordsList.innerHTML = keywordCloudData.map((item, index) => `
+      <div class="keyword-item" onclick="showRelatedPapers('${escapeHtml(item.text)}')">
+        <span class="keyword-rank">${index + 1}</span>
+        <span class="keyword-text">${escapeHtml(item.text)}</span>
+        <span class="keyword-count">${keywords[index].count}</span>
+      </div>
+    `).join('');
+  }
+
+  // 2. Trend Chart
+  const trendChartCard = document.getElementById('trendChartCard');
+  if (trendChartCard && window.currentDailyTrends) {
+    const top10Keywords = keywords.slice(0, 10).map(d => d.keyword);
+    const trendMap = new Map();
+    top10Keywords.forEach(k => trendMap.set(k, []));
+    
+    window.currentDailyTrends.forEach(item => {
+      if (trendMap.has(item.keyword)) {
+        trendMap.get(item.keyword).push({
+          date: new Date(item.date + 'T00:00:00Z'),
+          count: item.count
+        });
+      }
+    });
+    
+    const trendData = Array.from(trendMap.entries()).map(([keyword, values]) => ({
+      keyword: keyword,
+      values: values.sort((a, b) => a.date - b.date)
+    }));
+
+    if (window.currentValidDatesInRange && window.currentValidDatesInRange.length > 1 && top10Keywords.length > 0) {
+      trendChartCard.innerHTML = `<div id="trendChart" style="width: 100%; height: 100%;"></div>`;
+      setTimeout(() => {
+        drawTrendChart(trendData, window.currentValidDatesInRange);
+      }, 50);
+    } else {
+      trendChartCard.innerHTML = `
+        <div class="no-data" style="text-align: center; color: var(--text-secondary); line-height: 1.6; font-size: 14px; padding: 20px;">
+          📈 暂无趋势图：趋势图需要选择至少两天的数据来进行对比分析。<br>
+          Current selection contains only 1 day of data. Trend chart requires at least 2 days of data.
+        </div>
+      `;
+    }
+  }
+
+  // 3. Distribution Chart
+  const distSection = document.getElementById('keywordDistributionSection');
+  if (distSection) {
+    distSection.style.display = 'block';
+    setTimeout(() => {
+      drawDistributionChart(keywords);
+    }, 50);
+  }
+
+  // 4. Network Chart
+  const netContainer = document.getElementById('networkContainer');
+  if (netContainer && window.currentNetworkData) {
+    const netData = {
+        nodes: window.currentNetworkData.nodes.filter(n => !excludedSet.has(n.id)),
+        links: window.currentNetworkData.links.filter(l => {
+            const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+            const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+            return !excludedSet.has(sourceId) && !excludedSet.has(targetId);
+        })
+    };
+    renderNetwork(netData);
   }
 }
 
@@ -891,8 +928,8 @@ function changeDistDimension(dimension) {
   currentDistDimension = dimension;
   updateDistTabUI(dimension);
   
-  if (currentKeywordsData && currentKeywordsData.length > 0) {
-    drawDistributionChart(currentKeywordsData);
+  if (window.updateCharts) {
+    window.updateCharts();
   }
 }
 
@@ -912,21 +949,9 @@ function drawDistributionChart(keywords) {
       return;
     }
 
-    // 获取被排除的关键词
-    let excludedSet = new Set();
-    const excludeSelect = document.getElementById('excludeKeywordsSelect');
-    if (excludeSelect) {
-      Array.from(excludeSelect.selectedOptions).forEach(opt => {
-        excludedSet.add(opt.value);
-      });
-    }
-
-    // 过滤掉被排除的关键词
-    const filteredKeywords = keywords.filter(kw => !excludedSet.has(kw.keyword));
-
     // 选取前 60 个最重要的关键词作为堆叠段以确保图表的可读性与美感
     const topKeywordsCount = 60;
-    const topKeywords = filteredKeywords.slice(0, topKeywordsCount);
+    const topKeywords = keywords.slice(0, topKeywordsCount);
 
     let datasets = [];
     let labels = [];
