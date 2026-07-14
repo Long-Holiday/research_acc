@@ -399,14 +399,29 @@ def get_keyword_stats(
     try:
         cursor = conn.cursor()
         
-        cursor.execute("""
-        SELECT keyword, category, paper_date, SUM(frequency) as count
-        FROM keyword_stats
-        WHERE paper_date BETWEEN ? AND ?
-          AND language = ?
-          AND (? = 'All' OR category = ?)
-        GROUP BY keyword, category, paper_date
-        """, (start_date, end_date, lang, category, category))
+        if category == 'All':
+            query = """
+            SELECT keyword, category, paper_date, SUM(frequency) as count
+            FROM keyword_stats
+            WHERE paper_date BETWEEN ? AND ?
+              AND language = ?
+            GROUP BY keyword, category, paper_date
+            """
+            params = [start_date, end_date, lang]
+        else:
+            categories = category.split(',')
+            placeholders = ','.join(['?'] * len(categories))
+            query = f"""
+            SELECT keyword, category, paper_date, SUM(frequency) as count
+            FROM keyword_stats
+            WHERE paper_date BETWEEN ? AND ?
+              AND language = ?
+              AND category IN ({placeholders})
+            GROUP BY keyword, category, paper_date
+            """
+            params = [start_date, end_date, lang] + categories
+            
+        cursor.execute(query, params)
         
         rows = cursor.fetchall()
         
@@ -473,16 +488,33 @@ def get_network_stats(
     try:
         cursor = conn.cursor()
         
-        cursor.execute("""
-        SELECT keyword, SUM(frequency) as total
-        FROM keyword_stats
-        WHERE paper_date BETWEEN ? AND ?
-          AND language = ?
-          AND (? = 'All' OR category = ?)
-        GROUP BY keyword
-        ORDER BY total DESC
-        LIMIT 35
-        """, (start_date, end_date, lang, category, category))
+        if category == 'All':
+            query = """
+            SELECT keyword, SUM(frequency) as total
+            FROM keyword_stats
+            WHERE paper_date BETWEEN ? AND ?
+              AND language = ?
+            GROUP BY keyword
+            ORDER BY total DESC
+            LIMIT 35
+            """
+            params = [start_date, end_date, lang]
+        else:
+            categories = category.split(',')
+            placeholders = ','.join(['?'] * len(categories))
+            query = f"""
+            SELECT keyword, SUM(frequency) as total
+            FROM keyword_stats
+            WHERE paper_date BETWEEN ? AND ?
+              AND language = ?
+              AND category IN ({placeholders})
+            GROUP BY keyword
+            ORDER BY total DESC
+            LIMIT 35
+            """
+            params = [start_date, end_date, lang] + categories
+            
+        cursor.execute(query, params)
         
         nodes_rows = cursor.fetchall()
         nodes = [{"id": row[0], "value": row[1]} for row in nodes_rows]
@@ -490,20 +522,35 @@ def get_network_stats(
         
         links = []
         if top_35_keywords:
-            placeholders = ",".join(["?"] * len(top_35_keywords))
-            sql = f"""
-            SELECT pk1.keyword AS source, pk2.keyword AS target, COUNT(*) AS value
-            FROM paper_keywords pk1
-            JOIN paper_keywords pk2 ON pk1.paper_id = pk2.paper_id AND pk1.keyword < pk2.keyword
-            WHERE pk1.paper_date BETWEEN ? AND ?
-              AND pk1.language = ?
-              AND (? = 'All' OR pk1.category = ?)
-              AND pk1.keyword IN ({placeholders})
-              AND pk2.keyword IN ({placeholders})
-            GROUP BY pk1.keyword, pk2.keyword
-            """
-            params = [start_date, end_date, lang, category, category] + top_35_keywords + top_35_keywords
-            cursor.execute(sql, params)
+            kw_placeholders = ",".join(["?"] * len(top_35_keywords))
+            
+            if category == 'All':
+                sql = f"""
+                SELECT pk1.keyword AS source, pk2.keyword AS target, COUNT(*) AS value
+                FROM paper_keywords pk1
+                JOIN paper_keywords pk2 ON pk1.paper_id = pk2.paper_id AND pk1.keyword < pk2.keyword
+                WHERE pk1.paper_date BETWEEN ? AND ?
+                  AND pk1.language = ?
+                  AND pk1.keyword IN ({kw_placeholders})
+                  AND pk2.keyword IN ({kw_placeholders})
+                GROUP BY pk1.keyword, pk2.keyword
+                """
+                links_params = [start_date, end_date, lang] + top_35_keywords + top_35_keywords
+            else:
+                sql = f"""
+                SELECT pk1.keyword AS source, pk2.keyword AS target, COUNT(*) AS value
+                FROM paper_keywords pk1
+                JOIN paper_keywords pk2 ON pk1.paper_id = pk2.paper_id AND pk1.keyword < pk2.keyword
+                WHERE pk1.paper_date BETWEEN ? AND ?
+                  AND pk1.language = ?
+                  AND pk1.category IN ({placeholders})
+                  AND pk1.keyword IN ({kw_placeholders})
+                  AND pk2.keyword IN ({kw_placeholders})
+                GROUP BY pk1.keyword, pk2.keyword
+                """
+                links_params = [start_date, end_date, lang] + categories + top_35_keywords + top_35_keywords
+                
+            cursor.execute(sql, links_params)
             
             links_rows = cursor.fetchall()
             links = [{"source": row[0], "target": row[1], "value": row[2]} for row in links_rows]

@@ -669,7 +669,7 @@ async function renderCategoryStats(categories, validDatesInRange) {
   try {
     // 2. 发起 API 请求获取关键词和趋势数据
     const categoryParam = isAll ? 'All' : categories.join(',');
-    const keywordsUrl = `/api/stats/keywords?start_date=${globalStartDate}&end_date=${globalEndDate}&lang=${globalLang}&category=${categoryParam}`;
+    const keywordsUrl = `/api/stats/keywords?start_date=${encodeURIComponent(globalStartDate)}&end_date=${encodeURIComponent(globalEndDate)}&lang=${encodeURIComponent(globalLang)}&category=${encodeURIComponent(categoryParam)}`;
     const response = await Auth.fetchWithAuth(keywordsUrl);
     
     if (!response.ok) {
@@ -763,7 +763,7 @@ async function renderCategoryStats(categories, validDatesInRange) {
       setTimeout(async () => {
         try {
           const categoryParam = isAll ? 'All' : categories.join(',');
-          const networkUrl = `/api/stats/network?start_date=${globalStartDate}&end_date=${globalEndDate}&lang=${globalLang}&category=${categoryParam}`;
+          const networkUrl = `/api/stats/network?start_date=${encodeURIComponent(globalStartDate)}&end_date=${encodeURIComponent(globalEndDate)}&lang=${encodeURIComponent(globalLang)}&category=${encodeURIComponent(categoryParam)}`;
           const netResponse = await Auth.fetchWithAuth(networkUrl);
           if (!netResponse.ok) throw new Error("Failed to fetch network data");
           const networkData = await netResponse.json();
@@ -791,20 +791,16 @@ async function renderCategoryStats(categories, validDatesInRange) {
 }
 
 function getPalette(count) {
-  // 高质量的多色分类调色板，确保 15+ 个关键词在堆叠图中有极佳的视觉对比度与现代质感
-  const baseColors = [
-    '#6366f1', '#10b981', '#f43f5e', '#eab308', '#3b82f6', 
-    '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#a855f7',
-    '#06b6d4', '#84cc16', '#22c55e', '#ef4444', '#0284c7',
-    '#b45309', '#be185d', '#6d28d9', '#0369a1', '#15803d'
-  ];
-  if (count <= baseColors.length) {
-    return baseColors.slice(0, count);
-  }
-  const colors = [...baseColors];
-  for (let i = baseColors.length; i < count; i++) {
-    const hue = Math.round(((i - baseColors.length) * 360) / (count - baseColors.length)) % 360;
-    colors.push(`hsl(${hue}, 70%, 55%)`);
+  // 使用黄金角（Golden Angle, 约 137.5°）步进色相，确保任意相邻关键词颜色对比最大化
+  // 配合交替变化的饱和度和亮度，产生极具辨识度的丰富配色
+  const colors = [];
+  for (let i = 0; i < count; i++) {
+    const hue = (i * 137.508) % 360;
+    // 饱和度在 68% 到 86% 之间交替变化
+    const saturation = 68 + (i % 3) * 9;
+    // 亮度在 46% 到 58% 之间交替，提供明暗对比
+    const lightness = 46 + (i % 2) * 12;
+    colors.push(`hsl(${Math.round(hue)}, ${saturation}%, ${lightness}%)`);
   }
   return colors;
 }
@@ -859,8 +855,8 @@ function drawDistributionChart(keywords) {
       return;
     }
 
-    // 选取前 15 个最重要的关键词作为堆叠段以确保图表的可读性与美感
-    const topKeywordsCount = 15;
+    // 选取前 30 个最重要的关键词作为堆叠段以确保图表的可读性与美感
+    const topKeywordsCount = 30;
     const topKeywords = keywords.slice(0, topKeywordsCount);
 
     let datasets = [];
