@@ -23,6 +23,7 @@ docs/
 # Environment variables & secrets
 .env
 ai/.env
+.db
 
 # Node & Package Manager (If any)
 node_modules/

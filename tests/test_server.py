@@ -99,8 +99,96 @@ def test_auth_and_data_apis():
         # Invalid lang format should return 400
         response = client.get("/api/papers?date=2026-07-09&lang=../Chinese", headers=headers)
         assert response.status_code == 400
+
+        # Test keyword stats API
+        response = client.get("/api/stats/keywords?start_date=2026-07-09&end_date=2026-07-09&lang=Chinese&category=All", headers=headers)
+        assert response.status_code == 200
+        res_data = response.json()
+        assert "keywords" in res_data
+        assert "daily_trends" in res_data
+        kws = [k["keyword"] for k in res_data["keywords"]]
+        assert "test" in kws
+
+        # Test network stats API
+        response = client.get("/api/stats/network?start_date=2026-07-09&end_date=2026-07-09&lang=Chinese&category=All", headers=headers)
+        assert response.status_code == 200
+        res_net = response.json()
+        assert "nodes" in res_net
+        assert "links" in res_net
     finally:
         if os.path.exists(test_file):
             os.remove(test_file)
         # Restore ACCESS_PASSWORD
         server.ACCESS_PASSWORD = old_password
+
+
+def test_stats_apis():
+    # Configure fake password
+    import server
+    old_password = server.ACCESS_PASSWORD
+    server.ACCESS_PASSWORD = "testpassword"
+    
+    # Login
+    response = client.post("/api/auth/login", json={"password": "testpassword"})
+    assert response.status_code == 200
+    token = response.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Setup temp data folder for testing
+    os.makedirs("data", exist_ok=True)
+    test_file = "data/2026-07-09_AI_enhanced_Chinese.jsonl"
+    with open(test_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "id": "paper_1",
+            "title": "Proactive Context Graphs for Enterprise Agents",
+            "summary": "Retrieval-Augmented Generation RAG systems should be proactive enterprise agents.",
+            "categories": ["cs.AI", "cs.LG"]
+        }) + "\n")
+        f.write(json.dumps({
+            "id": "paper_2",
+            "title": "Active Graphs and Enterprise Networks",
+            "summary": "We study active context graphs in enterprise networks.",
+            "categories": ["cs.AI"]
+        }) + "\n")
+        
+    try:
+        # Clear stats database to ensure a clean slate
+        db_path = "data/statistics.db"
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+            except Exception:
+                pass
+
+        # Trigger API keywords
+        response = client.get("/api/stats/keywords?start_date=2026-07-09&end_date=2026-07-09&lang=Chinese&category=All", headers=headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "keywords" in data
+        assert "daily_trends" in data
+        
+        keywords = [k["keyword"] for k in data["keywords"]]
+        assert "graphs" in keywords or "enterprise" in keywords
+        assert len(data["daily_trends"]) > 0
+        
+        # Trigger API network
+        response = client.get("/api/stats/network?start_date=2026-07-09&end_date=2026-07-09&lang=Chinese&category=All", headers=headers)
+        assert response.status_code == 200
+        net_data = response.json()
+        assert "nodes" in net_data
+        assert "links" in net_data
+        
+        node_ids = [n["id"] for n in net_data["nodes"]]
+        assert "graphs" in node_ids or "enterprise" in node_ids
+        
+    finally:
+        if os.path.exists(test_file):
+            os.remove(test_file)
+        db_path = "data/statistics.db"
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+            except Exception:
+                pass
+        server.ACCESS_PASSWORD = old_password
+
