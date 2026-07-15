@@ -30,6 +30,55 @@ let currentDistDimension = 'category';
 let currentTrendYType = 'rate'; // 'rate' or 'count'
 window.globalSmoothness = 0;
 
+// ==========================================
+// Shared Utility Helpers
+// ==========================================
+
+/**
+ * 读取用户已排除的关键词列表（单一访问点，避免重复 localStorage 解析）
+ * @returns {string[]}
+ */
+function getExcludedKeywords() {
+  try {
+    const raw = localStorage.getItem('excludedKeywords');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 将 Date 对象格式化为 'YYYY-MM-DD' 字符串（供 API 传参）
+ * @param {Date} date
+ * @returns {string}
+ */
+function formatDateStr(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** 生成加载中占位 HTML */
+function createLoadingHTML(message = '正在加载 / Loading...') {
+  return `
+    <div class="loading-container" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:150px;width:100%;">
+      <div class="loading-spinner"></div>
+      <p style="margin-top:10px;color:var(--text-secondary);font-size:14px;">${message}</p>
+    </div>
+  `;
+}
+
+/** 生成无数据占位 HTML */
+function createNoDataHTML(message = 'No data available.') {
+  return `<div class="no-data" style="padding:20px;text-align:center;color:var(--text-secondary);"><p>${message}</p></div>`;
+}
+
+/** 生成错误占位 HTML */
+function createErrorHTML(message = 'An error occurred.') {
+  return `<div style="padding:20px;text-align:center;color:#e74c3c;"><p>${escapeHtml(message)}</p></div>`;
+}
+
 // Categories names are displayed directly from data keys to match the main page
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -59,17 +108,11 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchAvailableDates().then(() => {
     if (availableDates.length > 0) {
       const latestDateStr = availableDates[0];
-      const latestDate = new Date(latestDateStr);
-      const oneMonthAgo = new Date(latestDate);
+      const oneMonthAgo = new Date(latestDateStr);
       oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
-      
-      const oneMonthAgoStr = oneMonthAgo.getFullYear() + "-" + 
-                             String(oneMonthAgo.getMonth() + 1).padStart(2, '0') + "-" + 
-                             String(oneMonthAgo.getDate()).padStart(2, '0');
-                             
+      const oneMonthAgoStr = formatDateStr(oneMonthAgo);
       const datesInRange = availableDates.filter(d => d >= oneMonthAgoStr && d <= latestDateStr);
       const startDateStr = datesInRange.length > 0 ? datesInRange[datesInRange.length - 1] : latestDateStr;
-      
       loadPapersByDateRange(startDateStr, latestDateStr);
     }
   });
@@ -308,11 +351,7 @@ function initDatePicker() {
     const latestDate = new Date(defaultEndDate);
     const oneMonthAgo = new Date(latestDate);
     oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
-    
-    const oneMonthAgoStr = oneMonthAgo.getFullYear() + "-" + 
-                           String(oneMonthAgo.getMonth() + 1).padStart(2, '0') + "-" + 
-                           String(oneMonthAgo.getDate()).padStart(2, '0');
-                           
+    const oneMonthAgoStr = formatDateStr(oneMonthAgo);
     const datesInRange = availableDates.filter(d => d >= oneMonthAgoStr && d <= defaultEndDate);
     defaultStartDate = datesInRange.length > 0 ? datesInRange[datesInRange.length - 1] : defaultEndDate;
   }
@@ -343,10 +382,9 @@ function initDatePicker() {
   });
 }
 
+/** @deprecated 请使用 formatDateStr(date) */
 function formatDateForAPI(date) {
-  return date.getFullYear() + "-" + 
-         String(date.getMonth() + 1).padStart(2, '0') + "-" + 
-         String(date.getDate()).padStart(2, '0');
+  return formatDateStr(date);
 }
 
 // 提取关键词并进行总结
@@ -661,29 +699,11 @@ async function renderCategoryStats(categories, validDatesInRange) {
   const distributionCategoryName = document.getElementById('distributionCategoryName');
   if (distributionCategoryName) distributionCategoryName.textContent = categoryDisplayName;
 
-  const loadingSpinnerHTML = `
-    <div class="loading-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 150px; width: 100%;">
-      <div class="loading-spinner"></div>
-      <p style="margin-top: 10px; color: var(--text-secondary); font-size: 14px;">正在加载 / Loading...</p>
-    </div>
-  `;
-
+  const loadingSpinnerHTML = createLoadingHTML();
   if (hotKeywordsList) hotKeywordsList.innerHTML = loadingSpinnerHTML;
   if (trendChartCard) trendChartCard.innerHTML = loadingSpinnerHTML;
   if (netContainer) netContainer.innerHTML = loadingSpinnerHTML;
-  
-  if (distSection) {
-      distSection.style.display = 'block';
-      const canvas = document.getElementById('keywordDistributionChart');
-      if (canvas) {
-          const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = 'var(--text-secondary, #666)';
-          ctx.font = '14px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText('Loading distribution chart...', canvas.width / 2, canvas.height / 2);
-      }
-  }
+  if (distSection) distSection.style.display = 'block';
 
   try {
     // 2. 发起 API 请求获取关键词和趋势数据
@@ -702,34 +722,35 @@ async function renderCategoryStats(categories, validDatesInRange) {
     
     updateDistTabUI(currentDistDimension);
     
+    // 初始化/更新「排除关键词」多选控件
     const excludeSelect = document.getElementById('excludeKeywordsSelect');
     if (excludeSelect) {
       const choicesData = currentKeywordsData.slice(0, 100).map(kw => ({
         value: kw.keyword,
         label: kw.keyword
       }));
-      
-      const savedExcludesRaw = localStorage.getItem('excludedKeywords');
-      const savedExcludes = savedExcludesRaw ? JSON.parse(savedExcludesRaw) : [];
-      
+      const savedExcludes = getExcludedKeywords();
+      // 确保已保存的排除词也出现在选项列表中
       const choicesSet = new Set(choicesData.map(c => c.value));
       savedExcludes.forEach(ex => {
         if (!choicesSet.has(ex)) {
           choicesData.push({ value: ex, label: ex });
         }
       });
-      
       if (window.excludeChoices) {
+        // 已初始化，仅更新选项
         window.excludeChoices.clearChoices();
         window.excludeChoices.setChoices(choicesData, 'value', 'label', true);
         if (savedExcludes.length > 0) {
           window.excludeChoices.setChoiceByValue(savedExcludes);
         }
       } else {
+        // 首次初始化
         excludeSelect.innerHTML = '';
         choicesData.forEach(c => {
           const opt = document.createElement('option');
-          opt.value = c.value; opt.textContent = c.label;
+          opt.value = c.value;
+          opt.textContent = c.label;
           excludeSelect.appendChild(opt);
         });
         window.excludeChoices = new Choices(excludeSelect, {
@@ -738,26 +759,19 @@ async function renderCategoryStats(categories, validDatesInRange) {
           placeholderValue: 'Search keywords...',
           shouldSort: false
         });
-        
         if (savedExcludes.length > 0) {
           window.excludeChoices.setChoiceByValue(savedExcludes);
         }
-        
-        // Ensure change event triggers chart update
         excludeSelect.addEventListener('change', updateExcludeKeywords);
       }
     }
     
     if (currentKeywordsData.length === 0) {
-      const noKeywordsHTML = `
-        <div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);">
-          <p>当前分类下暂无热门关键词 / No keywords found in this category.</p>
-        </div>
-      `;
+      const noKeywordsHTML = createNoDataHTML('当前分类下暂无热门关键词 / No keywords found in this category.');
       if (hotKeywordsList) hotKeywordsList.innerHTML = noKeywordsHTML;
       if (trendChartCard) trendChartCard.innerHTML = noKeywordsHTML;
       if (distSection) distSection.style.display = 'none';
-      if (netContainer) netContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);">No sufficient keyword data.</div>';
+      if (netContainer) netContainer.innerHTML = createNoDataHTML('No sufficient keyword data.');
       return;
     }
 
@@ -773,16 +787,11 @@ async function renderCategoryStats(categories, validDatesInRange) {
 
   } catch (error) {
     console.error('加载统计数据失败:', error);
-    const errorHTML = `
-      <div class="error" style="padding: 20px; text-align: center; color: #e74c3c;">
-        <p>加载统计数据失败 / Failed to load statistics.</p>
-        <p>错误信息: ${error.message}</p>
-      </div>
-    `;
+    const errorHTML = createErrorHTML(`加载统计数据失败 / Failed to load statistics: ${error.message}`);
     if (hotKeywordsList) hotKeywordsList.innerHTML = errorHTML;
     if (trendChartCard) trendChartCard.innerHTML = errorHTML;
     if (distSection) distSection.style.display = 'none';
-    if (netContainer) netContainer.innerHTML = '<div style="padding:20px;text-align:center;color:red;">加载共现网络失败。</div>';
+    if (netContainer) netContainer.innerHTML = createErrorHTML('加载共现网络失败 / Failed to load network.');
   }
 }
 
@@ -791,24 +800,20 @@ async function loadAndRenderNetwork(categoryParam) {
   if (!netContainer) return;
   
   try {
-    const savedExcludesRaw = localStorage.getItem('excludedKeywords');
-    const savedExcludes = savedExcludesRaw ? JSON.parse(savedExcludesRaw) : [];
-    
+    const excludes = getExcludedKeywords();
     let networkUrl = `/api/stats/network?start_date=${encodeURIComponent(globalStartDate)}&end_date=${encodeURIComponent(globalEndDate)}&lang=${encodeURIComponent(globalLang)}&category=${encodeURIComponent(categoryParam)}`;
-    if (savedExcludes.length > 0) {
-      networkUrl += `&exclude=${encodeURIComponent(savedExcludes.join(','))}`;
+    if (excludes.length > 0) {
+      networkUrl += `&exclude=${encodeURIComponent(excludes.join(','))}`;
     }
-    
     const netResponse = await Auth.fetchWithAuth(networkUrl);
-    if (!netResponse.ok) throw new Error("Failed to fetch network data");
+    if (!netResponse.ok) throw new Error('Failed to fetch network data');
     window.currentNetworkData = await netResponse.json();
-    
     if (window.updateCharts) {
       window.updateCharts();
     }
   } catch (netErr) {
-    console.error("加载网络图失败:", netErr);
-    netContainer.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-secondary);">加载网络图失败 / Failed to load network: ${netErr.message}</div>`;
+    console.error('加载网络图失败:', netErr);
+    netContainer.innerHTML = createErrorHTML(`加载网络图失败 / Failed to load network: ${netErr.message}`);
   }
 }
 
@@ -856,14 +861,11 @@ function updateExcludeKeywords() {
     const selectedValues = window.excludeChoices.getValue(true);
     localStorage.setItem('excludedKeywords', JSON.stringify(selectedValues || []));
   }
-  
   if (window.updateCharts) {
     window.updateCharts();
   }
-
   // 重新加载并渲染共现网络图
-  const isAll = selectedCategories.includes('All');
-  const categoryParam = isAll ? 'All' : selectedCategories.join(',');
+  const categoryParam = selectedCategories.includes('All') ? 'All' : selectedCategories.join(',');
   loadAndRenderNetwork(categoryParam);
 }
 
@@ -871,10 +873,7 @@ window.updateTrendChart = function() {
   const trendChartCard = document.getElementById('trendChartCard');
   if (!trendChartCard || !window.currentDailyTrends || !currentKeywordsData) return;
 
-  const savedExcludesRaw = localStorage.getItem('excludedKeywords');
-  const savedExcludes = savedExcludesRaw ? JSON.parse(savedExcludesRaw) : [];
-  const excludedSet = new Set(savedExcludes);
-
+  const excludedSet = new Set(getExcludedKeywords());
   const keywords = currentKeywordsData.filter(kw => !excludedSet.has(kw.keyword));
   
   if (keywords.length === 0) {
@@ -928,22 +927,21 @@ window.updateTrendChart = function() {
 window.updateCharts = function() {
   if (!currentKeywordsData) return;
 
-  const savedExcludesRaw = localStorage.getItem('excludedKeywords');
-  const savedExcludes = savedExcludesRaw ? JSON.parse(savedExcludesRaw) : [];
-  const excludedSet = new Set(savedExcludes);
-
+  const excludedSet = new Set(getExcludedKeywords());
   const keywords = currentKeywordsData.filter(kw => !excludedSet.has(kw.keyword));
 
   const hotKeywordsList = document.getElementById('hotKeywordsList');
+  const trendChartCard = document.getElementById('trendChartCard');
+  const distSection = document.getElementById('keywordDistributionSection');
+  const netContainer = document.getElementById('networkContainer');
+
   if (keywords.length === 0) {
-      if (hotKeywordsList) hotKeywordsList.innerHTML = '<div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);"><p>暂无关键词 / No keywords found after filtering.</p></div>';
-      const trendChartCard = document.getElementById('trendChartCard');
-      if (trendChartCard) trendChartCard.innerHTML = '<div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);"><p>暂无趋势图 / No trend data after filtering.</p></div>';
-      const distSection = document.getElementById('keywordDistributionSection');
-      if (distSection) distSection.style.display = 'none';
-      const netContainer = document.getElementById('networkContainer');
-      if (netContainer) netContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);">暂无网络图 / No network data after filtering.</div>';
-      return;
+    const noDataMsg = createNoDataHTML('暂无关键词 / No keywords found after filtering.');
+    if (hotKeywordsList) hotKeywordsList.innerHTML = noDataMsg;
+    if (trendChartCard) trendChartCard.innerHTML = createNoDataHTML('暂无趋势图 / No trend data after filtering.');
+    if (distSection) distSection.style.display = 'none';
+    if (netContainer) netContainer.innerHTML = createNoDataHTML('暂无网络图 / No network data after filtering.');
+    return;
   }
 
   // 1. Hot Keywords
@@ -972,28 +970,24 @@ window.updateCharts = function() {
   window.updateTrendChart();
 
   // 3. Distribution Chart
-  const distSection = document.getElementById('keywordDistributionSection');
   if (distSection) {
     distSection.style.display = 'block';
-    setTimeout(() => {
-      drawDistributionChart(keywords);
-    }, 50);
+    setTimeout(() => drawDistributionChart(keywords), 50);
   }
 
-  // 4. Network Chart
-  const netContainer = document.getElementById('networkContainer');
+  // 4. Network Chart (filter out excluded nodes/links client-side)
   if (netContainer && window.currentNetworkData) {
     const netData = {
-        nodes: window.currentNetworkData.nodes.filter(n => !excludedSet.has(n.id)),
-        links: window.currentNetworkData.links.filter(l => {
-            const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
-            const targetId = typeof l.target === 'object' ? l.target.id : l.target;
-            return !excludedSet.has(sourceId) && !excludedSet.has(targetId);
-        })
+      nodes: window.currentNetworkData.nodes.filter(n => !excludedSet.has(n.id)),
+      links: window.currentNetworkData.links.filter(l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+        return !excludedSet.has(sourceId) && !excludedSet.has(targetId);
+      })
     };
     renderNetwork(netData);
   }
-}
+};
 
 function changeDistDimension(dimension) {
   if (currentDistDimension === dimension) return;
@@ -1854,22 +1848,16 @@ async function initHotPapers() {
   
   if (!journalSelect || !periodSelect || !tableContainer) return;
   
-  // 绑定选择改变事件
-  journalSelect.addEventListener('change', () => {
+  // 统一的过滤条件变更处理器
+  const onHotPapersFilterChange = () => {
     const journal = journalSelect.value;
     const period = periodSelect.value;
     if (journal && period) {
       loadHotPapers(journal, period);
     }
-  });
-  
-  periodSelect.addEventListener('change', () => {
-    const journal = journalSelect.value;
-    const period = periodSelect.value;
-    if (journal && period) {
-      loadHotPapers(journal, period);
-    }
-  });
+  };
+  journalSelect.addEventListener('change', onHotPapersFilterChange);
+  periodSelect.addEventListener('change', onHotPapersFilterChange);
 
   const sortSelect = document.getElementById('hotPapersSortSelect');
   if (sortSelect) {
