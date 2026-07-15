@@ -877,7 +877,14 @@ window.updateCharts = function() {
   // 2. Trend Chart
   const trendChartCard = document.getElementById('trendChartCard');
   if (trendChartCard && window.currentDailyTrends) {
-    const top10Keywords = keywords.slice(0, 10).map(d => d.keyword);
+    const sortedKeywordsForTrend = [...keywords].sort((a, b) => {
+      if (currentTrendYType === 'count') {
+        return (b.count || 0) - (a.count || 0);
+      } else {
+        return (b.rate || 0) - (a.rate || 0);
+      }
+    });
+    const top10Keywords = sortedKeywordsForTrend.slice(0, 10).map(d => d.keyword);
     const trendMap = new Map();
     top10Keywords.forEach(k => trendMap.set(k, []));
     

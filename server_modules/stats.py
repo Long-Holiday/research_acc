@@ -211,11 +211,11 @@ def get_keyword_stats(
         for p_date, total in cursor.fetchall():
             total_papers_map[p_date] = total
 
-        # Fetch paper counts containing top 10 keywords on each date
+        # Fetch paper counts containing top keywords on each date
         kw_papers_map = {}
-        top_10_keywords = [item["keyword"] for item in keywords_list[:10]]
-        if top_10_keywords:
-            kw_placeholders = ','.join(['?'] * len(top_10_keywords))
+        top_keywords = [item["keyword"] for item in keywords_list]
+        if top_keywords:
+            kw_placeholders = ','.join(['?'] * len(top_keywords))
             if category == 'All':
                 kw_query = f"""
                 SELECT keyword, paper_date, COUNT(DISTINCT paper_id)
@@ -225,7 +225,7 @@ def get_keyword_stats(
                   AND keyword IN ({kw_placeholders})
                 GROUP BY keyword, paper_date
                 """
-                kw_params = [start_date, end_date, lang] + top_10_keywords
+                kw_params = [start_date, end_date, lang] + top_keywords
             else:
                 placeholders = ','.join(['?'] * len(categories))
                 kw_query = f"""
@@ -237,14 +237,23 @@ def get_keyword_stats(
                   AND keyword IN ({kw_placeholders})
                 GROUP BY keyword, paper_date
                 """
-                kw_params = [start_date, end_date, lang] + categories + top_10_keywords
+                kw_params = [start_date, end_date, lang] + categories + top_keywords
             
             cursor.execute(kw_query, kw_params)
             for kw, p_date, kw_count in cursor.fetchall():
                 kw_papers_map[(kw, p_date)] = kw_count
 
+        total_papers_in_period = sum(total_papers_map.values())
+        for item in keywords_list:
+            kw = item["keyword"]
+            total_kw_papers = sum(kw_papers_map.get((kw, p_date), 0) for p_date in total_papers_map)
+            overall_rate = 0.0
+            if total_papers_in_period > 0:
+                overall_rate = round((total_kw_papers / total_papers_in_period) * 100, 2)
+            item["rate"] = overall_rate
+
         daily_trends = []
-        for kw in top_10_keywords:
+        for kw in top_keywords:
             if kw in keyword_data:
                 for p_date, count in keyword_data[kw]["date_distribution"].items():
                     total_on_date = total_papers_map.get(p_date, 0)
