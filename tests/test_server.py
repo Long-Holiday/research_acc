@@ -395,6 +395,14 @@ def test_hot_papers_apis():
             assert papers[0]["cited_by_count"] == 42
             assert papers[0]["url"] == "https://doi.org/10.1000/xyz123"
             assert papers[0]["publication_date"] == "2026-07-01"
+            
+            # Calculate expected citations per day
+            from datetime import datetime
+            expected_days = (datetime.now() - datetime.strptime("2026-07-01", "%Y-%m-%d")).days
+            expected_days = max(expected_days, 1)
+            expected_rate = round(42 / expected_days, 2)
+            assert papers[0]["citations_per_day"] == expected_rate
+            
             mock_get.assert_called_once()
             
             # Verify Cache Hit: Second request must use cached result without calling requests.get again
@@ -403,6 +411,7 @@ def test_hot_papers_apis():
             papers2 = response2.json()
             assert len(papers2) == 1
             assert papers2[0]["title"] == "Mocked Hot Paper"
+            assert papers2[0]["citations_per_day"] == expected_rate
             assert mock_get.call_count == 1
         
         # 测试非法 period
@@ -423,5 +432,99 @@ def test_hot_papers_apis():
         server.DB_PATH = old_server_db_path
         processor.DB_PATH = old_processor_db_path
         server.ACCESS_PASSWORD = old_password
+
+
+def test_keyword_growth_rate_ols():
+    # Configure fake password
+    import server
+    import server_modules.processor as processor
+    old_password = server.ACCESS_PASSWORD
+    server.ACCESS_PASSWORD = "testpassword"
+    
+    # Redirect DB paths to temp test database
+    old_server_db_path = server.DB_PATH
+    old_processor_db_path = processor.DB_PATH
+    server.DB_PATH = "data/test_statistics.db"
+    processor.DB_PATH = "data/test_statistics.db"
+    
+    # Login
+    response = client.post("/api/auth/login", json={"password": "testpassword"})
+    assert response.status_code == 200
+    token = response.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Setup temp data folder for testing
+    os.makedirs("data", exist_ok=True)
+    
+    test_file_0 = "data/2026-07-07_AI_enhanced_Chinese.jsonl"
+    test_file_1 = "data/2026-07-08_AI_enhanced_Chinese.jsonl"
+    test_file_2 = "data/2026-07-09_AI_enhanced_Chinese.jsonl"
+    
+    # We want "noisy" keyword to appear < 5 times total (e.g. 3 times)
+    # We want "frequent" keyword to appear >= 5 times total (e.g. 18 times)
+    
+    with open(test_file_0, "w", encoding="utf-8") as f:
+        # Frequent appears 1 time on Day 0 (count 3). Noisy does not appear (count 0).
+        f.write(json.dumps({"id": "p0_1", "title": "frequent", "summary": "", "categories": ["cs.AI"]}) + "\n")
+        
+    with open(test_file_1, "w", encoding="utf-8") as f:
+        # Frequent appears 2 times on Day 1 (count 6). Noisy appears 1 time in summary (count 1).
+        f.write(json.dumps({"id": "p1_1", "title": "frequent", "summary": "", "categories": ["cs.AI"]}) + "\n")
+        f.write(json.dumps({"id": "p1_2", "title": "frequent", "summary": "noisy", "categories": ["cs.AI"]}) + "\n")
+        
+    with open(test_file_2, "w", encoding="utf-8") as f:
+        # Frequent appears 3 times on Day 2 (count 9). Noisy appears 2 times in summaries (count 2).
+        f.write(json.dumps({"id": "p2_1", "title": "frequent", "summary": "", "categories": ["cs.AI"]}) + "\n")
+        f.write(json.dumps({"id": "p2_2", "title": "frequent", "summary": "noisy", "categories": ["cs.AI"]}) + "\n")
+        f.write(json.dumps({"id": "p2_3", "title": "frequent", "summary": "noisy", "categories": ["cs.AI"]}) + "\n")
+        
+    try:
+        # Clear stats database to ensure a clean slate
+        test_db_path = "data/test_statistics.db"
+        if os.path.exists(test_db_path):
+            try:
+                os.remove(test_db_path)
+            except Exception:
+                pass
+
+        # Trigger API keywords
+        response = client.get(
+            "/api/stats/keywords?start_date=2026-07-07&end_date=2026-07-09&lang=Chinese&category=All",
+            headers=headers
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "keywords" in data
+        
+        # Check keyword stats
+        kw_map = {k["keyword"]: k for k in data["keywords"]}
+        
+        assert "frequent" in kw_map
+        assert kw_map["frequent"]["count"] == 18
+        assert kw_map["frequent"]["growth_rate"] == 3.0
+        
+        # Now check "noisy".
+        assert "noisy" in kw_map
+        assert kw_map["noisy"]["count"] == 3
+        assert kw_map["noisy"]["growth_rate"] == 0.0
+        
+    finally:
+        for tf in [test_file_0, test_file_1, test_file_2]:
+            if os.path.exists(tf):
+                try:
+                    os.remove(tf)
+                except Exception:
+                    pass
+        test_db_path = "data/test_statistics.db"
+        if os.path.exists(test_db_path):
+            try:
+                os.remove(test_db_path)
+            except Exception:
+                pass
+        # Restore DB paths
+        server.DB_PATH = old_server_db_path
+        processor.DB_PATH = old_processor_db_path
+        server.ACCESS_PASSWORD = old_password
+
 
 

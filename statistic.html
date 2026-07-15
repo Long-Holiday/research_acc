@@ -119,6 +119,10 @@
                                 热门论文排行榜 (OpenAlex)
                             </h2>
                             <div class="filter-controls" style="display: flex; gap: 10px; align-items: center;">
+                                <select id="hotPapersSortSelect" class="styled-select" style="min-width: 150px;">
+                                    <option value="rate" selected>按引用速率排序</option>
+                                    <option value="total">按引用总数排序</option>
+                                </select>
                                 <select id="hotPapersJournalSelect" class="styled-select" style="min-width: 150px;">
                                     <option value="">加载期刊中...</option>
                                 </select>

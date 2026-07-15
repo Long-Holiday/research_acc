@@ -32,7 +32,7 @@ def fetch_top_papers_from_openalex(issn_list, from_date):
     params = {
         "filter": f"primary_location.source.issn:{issn_str},from_publication_date:{from_date}",
         "sort": "cited_by_count:desc",
-        "per_page": 10,
+        "per_page": 50,  # 获取更多候选论文以进行速率排序
         "page": 1
     }
     if api_key:
@@ -64,11 +64,23 @@ def fetch_top_papers_from_openalex(issn_list, from_date):
         paper_url = paper.get("doi") or (primary_loc.get("landing_page_url") if isinstance(primary_loc, dict) else "") or ""
         pub_date = paper.get("publication_date") or ""
         
+        # Calculate citations per day (citations_per_day = cited_by_count / max(days_since_publication, 1))
+        citations_per_day = 0.0
+        if pub_date:
+            try:
+                pub_dt = datetime.strptime(pub_date, "%Y-%m-%d")
+                days_since = (datetime.now() - pub_dt).days
+                days_since = max(days_since, 1)
+                citations_per_day = round(cited_by / days_since, 2)
+            except Exception:
+                pass
+
         formatted_papers.append({
             "id": paper.get("id") or "",
             "title": title,
             "authors": authors_str,
             "cited_by_count": cited_by,
+            "citations_per_day": citations_per_day,
             "url": paper_url,
             "publication_date": pub_date
         })
@@ -141,19 +153,23 @@ def get_keyword_stats(
             end_dt = datetime.strptime(end_date, "%Y-%m-%d")
             delta_days = (end_dt - start_dt).days
             if delta_days >= 1:
-                midpoint_dt = start_dt + timedelta(days=delta_days // 2)
-                midpoint_str = midpoint_dt.strftime("%Y-%m-%d")
+                N = delta_days
+                x_mean = N / 2.0
+                denominator = sum((i - x_mean) ** 2 for i in range(N + 1))
                 
                 for kw, entry in keyword_data.items():
-                    first_half_sum = 0
-                    second_half_sum = 0
-                    for p_date, count in entry["date_distribution"].items():
-                        if p_date <= midpoint_str:
-                            first_half_sum += count
-                        else:
-                            second_half_sum += count
+                    if entry["count"] < 5:
+                        entry["growth_rate"] = 0.0
+                        continue
                     
-                    entry["growth_rate"] = (second_half_sum - first_half_sum) / max(first_half_sum, 1)
+                    y = []
+                    for i in range(N + 1):
+                        dt = start_dt + timedelta(days=i)
+                        dt_str = dt.strftime("%Y-%m-%d")
+                        y.append(entry["date_distribution"].get(dt_str, 0))
+                    
+                    numerator = sum((i - x_mean) * y[i] for i in range(N + 1))
+                    entry["growth_rate"] = float(numerator / denominator)
             else:
                 for kw, entry in keyword_data.items():
                     entry["growth_rate"] = 0.0
@@ -167,15 +183,80 @@ def get_keyword_stats(
         # Limit to 100
         keywords_list = keywords_list[:100]
         
-        daily_trends = []
+        # Fetch daily total papers count for rate normalization
+        total_papers_map = {}
+        if category == 'All':
+            total_query = """
+            SELECT paper_date, COUNT(DISTINCT paper_id)
+            FROM paper_keywords
+            WHERE paper_date BETWEEN ? AND ?
+              AND language = ?
+            GROUP BY paper_date
+            """
+            total_params = [start_date, end_date, lang]
+        else:
+            categories = category.split(',')
+            placeholders = ','.join(['?'] * len(categories))
+            total_query = f"""
+            SELECT paper_date, COUNT(DISTINCT paper_id)
+            FROM paper_keywords
+            WHERE paper_date BETWEEN ? AND ?
+              AND language = ?
+              AND category IN ({placeholders})
+            GROUP BY paper_date
+            """
+            total_params = [start_date, end_date, lang] + categories
+        
+        cursor.execute(total_query, total_params)
+        for p_date, total in cursor.fetchall():
+            total_papers_map[p_date] = total
+
+        # Fetch paper counts containing top 10 keywords on each date
+        kw_papers_map = {}
         top_10_keywords = [item["keyword"] for item in keywords_list[:10]]
+        if top_10_keywords:
+            kw_placeholders = ','.join(['?'] * len(top_10_keywords))
+            if category == 'All':
+                kw_query = f"""
+                SELECT keyword, paper_date, COUNT(DISTINCT paper_id)
+                FROM paper_keywords
+                WHERE paper_date BETWEEN ? AND ?
+                  AND language = ?
+                  AND keyword IN ({kw_placeholders})
+                GROUP BY keyword, paper_date
+                """
+                kw_params = [start_date, end_date, lang] + top_10_keywords
+            else:
+                placeholders = ','.join(['?'] * len(categories))
+                kw_query = f"""
+                SELECT keyword, paper_date, COUNT(DISTINCT paper_id)
+                FROM paper_keywords
+                WHERE paper_date BETWEEN ? AND ?
+                  AND language = ?
+                  AND category IN ({placeholders})
+                  AND keyword IN ({kw_placeholders})
+                GROUP BY keyword, paper_date
+                """
+                kw_params = [start_date, end_date, lang] + categories + top_10_keywords
+            
+            cursor.execute(kw_query, kw_params)
+            for kw, p_date, kw_count in cursor.fetchall():
+                kw_papers_map[(kw, p_date)] = kw_count
+
+        daily_trends = []
         for kw in top_10_keywords:
             if kw in keyword_data:
                 for p_date, count in keyword_data[kw]["date_distribution"].items():
+                    total_on_date = total_papers_map.get(p_date, 0)
+                    kw_papers_on_date = kw_papers_map.get((kw, p_date), 0)
+                    rate = 0.0
+                    if total_on_date > 0:
+                        rate = round((kw_papers_on_date / total_on_date) * 100, 2)
                     daily_trends.append({
                         "keyword": kw,
                         "date": p_date,
-                        "count": count
+                        "count": count,
+                        "rate": rate
                     })
         daily_trends.sort(key=lambda x: x["date"])
         
@@ -320,7 +401,25 @@ def get_hot_papers(journal: str, period: int, token: str = Depends(verify_token)
         
         row = cursor.fetchone()
         if row:
-            return json.loads(row[0])
+            papers = json.loads(row[0])
+            # Ensure citations_per_day is present for cached papers
+            updated = False
+            for paper in papers:
+                if "citations_per_day" not in paper:
+                    pub_date = paper.get("publication_date") or ""
+                    cited_by = paper.get("cited_by_count") or 0
+                    citations_per_day = 0.0
+                    if pub_date:
+                        try:
+                            pub_dt = datetime.strptime(pub_date, "%Y-%m-%d")
+                            days_since = (datetime.now() - pub_dt).days
+                            days_since = max(days_since, 1)
+                            citations_per_day = round(cited_by / days_since, 2)
+                        except Exception:
+                            pass
+                    paper["citations_per_day"] = citations_per_day
+                    updated = True
+            return papers
             
         # Cache miss, fetch from OpenAlex
         from_date = (datetime.now() - timedelta(days=period)).strftime("%Y-%m-%d")

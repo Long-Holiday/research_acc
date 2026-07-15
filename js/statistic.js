@@ -18,6 +18,7 @@ let flatpickrStartInstance = null;
 let flatpickrEndInstance = null;
 let allPapersData = [];
 let selectedCategories = ['All'];
+let currentHotPapersList = [];
 
 // Global variables for backend integration
 let globalStartDate = '';
@@ -880,26 +881,9 @@ window.updateCharts = function() {
     const trendMap = new Map();
     top10Keywords.forEach(k => trendMap.set(k, []));
     
-    // Filter papers for the selected categories
-    const isAll = selectedCategories.includes('All');
-    const filteredPapers = isAll 
-      ? allPapersData 
-      : allPapersData.filter(paper => paper.category && selectedCategories.includes(paper.category[0]));
-
     window.currentDailyTrends.forEach(item => {
       if (trendMap.has(item.keyword)) {
-        const dateStr = item.date;
-        const papersOnDate = filteredPapers.filter(p => p.date === dateStr);
-        const totalPapersOnDate = papersOnDate.length;
-        
-        // Count how many of these papers contain the keyword
-        const papersWithKeyword = papersOnDate.filter(p => {
-          const searchText = (p.title + ' ' + p.summary).toLowerCase();
-          return searchText.includes(item.keyword.toLowerCase());
-        }).length;
-        
-        const rate = totalPapersOnDate > 0 ? parseFloat(((papersWithKeyword / totalPapersOnDate) * 100).toFixed(2)) : 0;
-        
+        const rate = item.rate || 0;
         trendMap.get(item.keyword).push({
           date: new Date(item.date + 'T00:00:00Z'),
           count: item.count,
@@ -1681,7 +1665,7 @@ function renderNetwork(dataOrPapers) {
         .enter().append("circle")
         .attr("class", "network-node")
         .attr("r", d => sizeScale(d.value))
-        .attr("fill", d => color(d.id))
+        .attr("fill", d => color(d.group !== undefined ? d.group : (d.community !== undefined ? d.community : d.id)))
         .call(d3.drag()
             .on("start", dragstarted)
             .on("drag", dragged)
@@ -1787,6 +1771,15 @@ async function initHotPapers() {
       loadHotPapers(journal, period);
     }
   });
+
+  const sortSelect = document.getElementById('hotPapersSortSelect');
+  if (sortSelect) {
+    sortSelect.addEventListener('change', () => {
+      if (currentHotPapersList && currentHotPapersList.length > 0) {
+        renderHotPapersTable(currentHotPapersList);
+      }
+    });
+  }
   
   // 加载可用期刊列表
   try {
@@ -1847,6 +1840,7 @@ async function loadHotPapers(journal, period) {
       throw new Error(`Failed to load hot papers: ${response.statusText}`);
     }
     const papers = await response.json();
+    currentHotPapersList = papers;
     renderHotPapersTable(papers);
   } catch (error) {
     console.error('加载热门论文排行榜失败:', error);
@@ -1873,6 +1867,31 @@ function renderHotPapersTable(papers) {
     return;
   }
   
+  // Get sorting preference
+  const sortSelect = document.getElementById('hotPapersSortSelect');
+  const sortBy = sortSelect ? sortSelect.value : 'rate';
+  
+  // Sort papers copy
+  const sortedPapers = [...papers];
+  if (sortBy === 'rate') {
+    sortedPapers.sort((a, b) => {
+      const rateA = parseFloat(a.citations_per_day) || 0;
+      const rateB = parseFloat(b.citations_per_day) || 0;
+      if (rateB !== rateA) return rateB - rateA;
+      return (b.cited_by_count || 0) - (a.cited_by_count || 0);
+    });
+  } else {
+    sortedPapers.sort((a, b) => {
+      const totalA = parseInt(a.cited_by_count) || 0;
+      const totalB = parseInt(b.cited_by_count) || 0;
+      if (totalB !== totalA) return totalB - totalA;
+      return (parseFloat(b.citations_per_day) || 0) - (parseFloat(a.citations_per_day) || 0);
+    });
+  }
+  
+  // Slice to top 10
+  const displayPapers = sortedPapers.slice(0, 10);
+  
   let tableHTML = `
     <div class="hot-papers-table-wrapper">
       <table class="hot-papers-table">
@@ -1882,13 +1901,13 @@ function renderHotPapersTable(papers) {
             <th>论文标题</th>
             <th style="width: 250px;">作者</th>
             <th style="width: 120px;">发表日期</th>
-            <th style="width: 120px; text-align: right;">引用次数</th>
+            <th style="width: 150px; text-align: right;">引用总数 (速率)</th>
           </tr>
         </thead>
         <tbody>
   `;
   
-  papers.forEach((paper, index) => {
+  displayPapers.forEach((paper, index) => {
     const rank = index + 1;
     let rankBadgeClass = '';
     if (rank === 1) rankBadgeClass = 'rank-badge-1';
@@ -1911,6 +1930,7 @@ function renderHotPapersTable(papers) {
     
     const date = escapeHtml(paper.publication_date || paper.date || 'N/A');
     const citations = parseInt(paper.cited_by_count) || 0;
+    const rate = parseFloat(paper.citations_per_day) || 0.0;
     
     tableHTML += `
       <tr>
@@ -1929,12 +1949,17 @@ function renderHotPapersTable(papers) {
           <span class="hot-paper-date">${date}</span>
         </td>
         <td style="text-align: right;">
-          <span class="citation-badge" title="Citations: ${citations}">
-            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" fill="currentColor"/>
-            </svg>
-            ${citations}
-          </span>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+            <span class="citation-badge" title="Citations: ${citations}">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" fill="currentColor"/>
+              </svg>
+              ${citations}
+            </span>
+            <span class="citation-rate-badge" title="Citations per Day: ${rate.toFixed(2)}" style="font-size: 11px; color: var(--text-secondary, #64748b); white-space: nowrap;">
+              ⚡ ${rate.toFixed(2)} / 天
+            </span>
+          </div>
         </td>
       </tr>
     `;
