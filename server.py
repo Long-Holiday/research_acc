@@ -386,6 +386,134 @@ def get_network_stats(
     finally:
         conn.close()
 
+
+# Helper to fetch journals Safely
+try:
+    from daily_paper.daily_journals.constants import JOURNALS
+except ModuleNotFoundError:
+    import sys
+    sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'daily_paper'))
+    from daily_journals.constants import JOURNALS
+
+def fetch_top_papers_from_openalex(issn_list, from_date):
+    import requests
+    issn_str = "|".join(issn_list)
+    headers = {
+        "User-Agent": "daily-arXiv-ai-enhanced/1.0 (mailto:dw-dengwei@users.noreply.github.com)"
+    }
+    api_key = os.environ.get("OPENALEX_API_KEY", "")
+    
+    url = "https://api.openalex.org/works"
+    params = {
+        "filter": f"primary_location.source.issn:{issn_str},from_publication_date:{from_date}",
+        "sort": "cited_by_count:desc",
+        "per_page": 10,
+        "page": 1
+    }
+    if api_key:
+        params["api_key"] = api_key
+        
+    resp = requests.get(url, params=params, headers=headers, timeout=20)
+    if resp.status_code != 200:
+        raise Exception(f"OpenAlex API error {resp.status_code}: {resp.text}")
+        
+    data = resp.json()
+    results = data.get("results", [])
+    
+    formatted_papers = []
+    for paper in results:
+        title = paper.get("title", "Untitled")
+        
+        authors_list = []
+        for authorship in paper.get("authorships", []):
+            author_name = authorship.get("author", {}).get("display_name")
+            if author_name:
+                authors_list.append(author_name)
+        authors_str = ", ".join(authors_list[:5])
+        if len(authors_list) > 5:
+            authors_str += " et al."
+            
+        cited_by = paper.get("cited_by_count", 0)
+        paper_url = paper.get("doi") or paper.get("primary_location", {}).get("landing_page_url") or ""
+        pub_date = paper.get("publication_date", "")
+        
+        formatted_papers.append({
+            "id": paper.get("id", ""),
+            "title": title,
+            "authors": authors_str,
+            "cited_by_count": cited_by,
+            "url": paper_url,
+            "publication_date": pub_date
+        })
+        
+    return formatted_papers
+
+@app.get("/api/stats/journals")
+def get_journals(token: str = Depends(verify_token)):
+    return [{"name": j["name"], "category": j["category"]} for j in JOURNALS]
+
+@app.get("/api/stats/hot-papers")
+def get_hot_papers(journal: str, period: int, token: str = Depends(verify_token)):
+    if period not in [7, 15, 30]:
+        raise HTTPException(status_code=400, detail="Invalid period. Must be 7, 15, or 30.")
+    
+    selected_journal = None
+    for j in JOURNALS:
+        if j["name"] == journal or j["category"] == journal:
+            selected_journal = j
+            break
+            
+    if not selected_journal:
+        raise HTTPException(status_code=404, detail=f"Journal '{journal}' not found in configuration.")
+    
+    db_path = "data/statistics.db"
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = connect_db(db_path)
+    
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS hot_papers_cache (
+            journal TEXT,
+            period INTEGER,
+            query_date TEXT,
+            papers_json TEXT,
+            PRIMARY KEY (journal, period, query_date)
+        )
+        """)
+        conn.commit()
+        
+        cursor.execute("""
+        SELECT papers_json FROM hot_papers_cache
+        WHERE journal = ? AND period = ? AND query_date = ?
+        """, (selected_journal["name"], period, today_str))
+        
+        row = cursor.fetchone()
+        if row:
+            return json.loads(row[0])
+            
+        # Cache miss, fetch from OpenAlex
+        from_date = (datetime.now() - timedelta(days=period)).strftime("%Y-%m-%d")
+        papers = fetch_top_papers_from_openalex(selected_journal["issns"], from_date)
+        
+        # Store in cache
+        cursor.execute("""
+        INSERT OR REPLACE INTO hot_papers_cache (journal, period, query_date, papers_json)
+        VALUES (?, ?, ?, ?)
+        """, (selected_journal["name"], period, today_str, json.dumps(papers)))
+        conn.commit()
+        
+        return papers
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch hot papers: {str(e)}")
+    finally:
+        conn.close()
+
+
 # Serve HTML pages directly
 @app.get("/")
 @app.get("/index.html")

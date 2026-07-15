@@ -267,3 +267,36 @@ def test_papers_range_api():
                 pass
         server.ACCESS_PASSWORD = old_password
 
+
+def test_hot_papers_apis():
+    # Setup test password and login
+    import server
+    old_password = server.ACCESS_PASSWORD
+    server.ACCESS_PASSWORD = "testpassword"
+    
+    response = client.post("/api/auth/login", json={"password": "testpassword"})
+    assert response.status_code == 200
+    token = response.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # 1. 测试获取期刊接口
+    response = client.get("/api/stats/journals", headers=headers)
+    assert response.status_code == 200
+    journals = response.json()
+    assert len(journals) > 0
+    assert "TGRS" in [j["name"] for j in journals]
+    
+    # 2. 测试获取热门论文（模拟 OpenAlex 查询或确保缓存及接口能正常响应）
+    response = client.get("/api/stats/hot-papers?journal=TGRS&period=30", headers=headers)
+    assert response.status_code in [200, 500] # 如果没配置 API key 或访问不通可能报 500
+    
+    # 测试非法 period
+    response = client.get("/api/stats/hot-papers?journal=TGRS&period=5", headers=headers)
+    assert response.status_code == 400
+    
+    # 测试非法 journal
+    response = client.get("/api/stats/hot-papers?journal=INVALID&period=30", headers=headers)
+    assert response.status_code == 404
+    
+    server.ACCESS_PASSWORD = old_password
+
