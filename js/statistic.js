@@ -51,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('resize', checkScreenSize);
 
   initEventListeners();
+  initHotPapers();
   
   fetchAvailableDates().then(() => {
     if (availableDates.length > 0) {
@@ -1665,4 +1666,193 @@ function renderNetwork(dataOrPapers) {
         d.fx = null;
         d.fy = null;
     }
+}
+
+// ==========================================
+// Hot Papers Leaderboard (OpenAlex)
+// ==========================================
+
+async function initHotPapers() {
+  const journalSelect = document.getElementById('hotPapersJournalSelect');
+  const periodSelect = document.getElementById('hotPapersPeriodSelect');
+  const tableContainer = document.getElementById('hotPapersTableContainer');
+  
+  if (!journalSelect || !periodSelect || !tableContainer) return;
+  
+  // 绑定选择改变事件
+  journalSelect.addEventListener('change', () => {
+    const journal = journalSelect.value;
+    const period = periodSelect.value;
+    if (journal && period) {
+      loadHotPapers(journal, period);
+    }
+  });
+  
+  periodSelect.addEventListener('change', () => {
+    const journal = journalSelect.value;
+    const period = periodSelect.value;
+    if (journal && period) {
+      loadHotPapers(journal, period);
+    }
+  });
+  
+  // 加载可用期刊列表
+  try {
+    const response = await Auth.fetchWithAuth('/api/stats/journals');
+    if (!response.ok) {
+      throw new Error(`Failed to load journals: ${response.statusText}`);
+    }
+    const journals = await response.json();
+    
+    // 填充期刊下拉菜单
+    journalSelect.innerHTML = '';
+    if (journals.length === 0) {
+      journalSelect.innerHTML = '<option value="">无可用期刊</option>';
+      tableContainer.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">暂无期刊配置</div>';
+      return;
+    }
+    
+    journals.forEach(j => {
+      const option = document.createElement('option');
+      option.value = j.name;
+      option.textContent = `${j.name} (${j.category})`;
+      journalSelect.appendChild(option);
+    });
+    
+    // 默认加载第一个期刊和当前选中的时间段 (默认 30 天)
+    const defaultJournal = journals[0].name;
+    const defaultPeriod = periodSelect.value || "30";
+    
+    loadHotPapers(defaultJournal, defaultPeriod);
+    
+  } catch (error) {
+    console.error('初始化热门论文排行榜失败:', error);
+    tableContainer.innerHTML = `
+      <div class="error-container">
+        <p>加载期刊列表失败 / Failed to load journal list.</p>
+        <p style="font-size: 13px; color: #868e96; margin-top: 4px;">${escapeHtml(error.message)}</p>
+        <button class="retry-button" onclick="initHotPapers()">点击重试 / Retry</button>
+      </div>
+    `;
+  }
+}
+
+async function loadHotPapers(journal, period) {
+  const tableContainer = document.getElementById('hotPapersTableContainer');
+  if (!tableContainer) return;
+  
+  tableContainer.innerHTML = `
+    <div class="loading-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 150px; width: 100%;">
+      <div class="loading-spinner"></div>
+      <p style="margin-top: 12px; color: var(--text-secondary); font-size: 14px;">正在获取 OpenAlex 数据...</p>
+    </div>
+  `;
+  
+  try {
+    const url = `/api/stats/hot-papers?journal=${encodeURIComponent(journal)}&period=${encodeURIComponent(period)}`;
+    const response = await Auth.fetchWithAuth(url);
+    if (!response.ok) {
+      throw new Error(`Failed to load hot papers: ${response.statusText}`);
+    }
+    const papers = await response.json();
+    renderHotPapersTable(papers);
+  } catch (error) {
+    console.error('加载热门论文排行榜失败:', error);
+    tableContainer.innerHTML = `
+      <div class="error-container">
+        <p>获取 OpenAlex 数据失败 / Failed to fetch OpenAlex data.</p>
+        <p style="font-size: 13px; color: #868e96; margin-top: 4px;">${escapeHtml(error.message)}</p>
+        <button class="retry-button" onclick="loadHotPapers('${escapeHtml(journal)}', '${escapeHtml(period)}')">点击重试 / Retry</button>
+      </div>
+    `;
+  }
+}
+
+function renderHotPapersTable(papers) {
+  const tableContainer = document.getElementById('hotPapersTableContainer');
+  if (!tableContainer) return;
+  
+  if (!papers || papers.length === 0) {
+    tableContainer.innerHTML = `
+      <div class="no-data" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+        <p>最近该期刊暂无高被引热门论文 / No hot papers found for this period.</p>
+      </div>
+    `;
+    return;
+  }
+  
+  let tableHTML = `
+    <div class="hot-papers-table-wrapper">
+      <table class="hot-papers-table">
+        <thead>
+          <tr>
+            <th style="width: 70px; text-align: center;">排名</th>
+            <th>论文标题</th>
+            <th style="width: 250px;">作者</th>
+            <th style="width: 120px;">发表日期</th>
+            <th style="width: 120px; text-align: right;">引用次数</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+  
+  papers.forEach((paper, index) => {
+    const rank = index + 1;
+    let rankBadgeClass = '';
+    if (rank === 1) rankBadgeClass = 'rank-badge-1';
+    else if (rank === 2) rankBadgeClass = 'rank-badge-2';
+    else if (rank === 3) rankBadgeClass = 'rank-badge-3';
+    else rankBadgeClass = 'rank-badge-other';
+    
+    const title = escapeHtml(paper.title || 'Untitled');
+    const url = paper.url ? escapeHtml(paper.url) : '#';
+    
+    let authorsDisplay = '';
+    if (Array.isArray(paper.authors)) {
+      authorsDisplay = escapeHtml(paper.authors.slice(0, 5).join(', '));
+      if (paper.authors.length > 5) {
+        authorsDisplay += ' et al.';
+      }
+    } else {
+      authorsDisplay = escapeHtml(paper.authors || 'Unknown');
+    }
+    
+    const date = escapeHtml(paper.publication_date || paper.date || 'N/A');
+    const citations = parseInt(paper.cited_by_count) || 0;
+    
+    tableHTML += `
+      <tr>
+        <td style="text-align: center;">
+          <span class="rank-badge ${rankBadgeClass}">${rank}</span>
+        </td>
+        <td>
+          <a href="${url}" class="hot-paper-title-link" target="_blank" rel="noopener noreferrer" title="${title}">
+            ${title}
+          </a>
+        </td>
+        <td>
+          <div class="hot-paper-authors" title="${authorsDisplay}">${authorsDisplay}</div>
+        </td>
+        <td>
+          <span class="hot-paper-date">${date}</span>
+        </td>
+        <td style="text-align: right;">
+          <span class="citation-badge" title="Citations: ${citations}">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" fill="currentColor"/>
+            </svg>
+            ${citations}
+          </span>
+        </td>
+      </tr>
+    `;
+  });
+  
+  tableHTML += `
+        </tbody>
+      </table>
+    </div>
+  `;
+  
+  tableContainer.innerHTML = tableHTML;
 }

@@ -473,8 +473,8 @@ def get_journals(token: str = Depends(verify_token)):
 
 @app.get("/api/stats/hot-papers")
 def get_hot_papers(journal: str, period: int, token: str = Depends(verify_token)):
-    if period not in [7, 15, 30]:
-        raise HTTPException(status_code=400, detail="Invalid period. Must be 7, 15, or 30.")
+    if period not in [30, 180, 365]:
+        raise HTTPException(status_code=400, detail="Invalid period. Must be 30, 180, or 365.")
     
     selected_journal = None
     for j in JOURNALS:

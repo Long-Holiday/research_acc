@@ -114,6 +114,33 @@
                         <!-- Paper statistics will be dynamically inserted here -->
                     </div>
 
+                    <!-- 热门论文排行榜 (OpenAlex) -->
+                    <div class="statistics-section" id="hotPapersSection" style="margin-top: 30px;">
+                        <div class="section-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                            <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M19 5H18V3H6V5H5C3.9 5 3 5.9 3 7V9C3 11.21 4.79 13 7 13H9C9.72 13 10.39 12.77 10.94 12.39C11.56 13.39 12.7 14 14 14H15V18H11V20H13V22H17V20H19V18H15V14.82C17.21 14.39 19 12.42 19 10V9H21V7C21 5.9 20.1 5 19 5ZM7 11C5.9 11 5 10.1 5 9V7H7V11ZM19 9H17V7H19V9Z" fill="currentColor"/>
+                                </svg>
+                                热门论文排行榜 (OpenAlex)
+                            </h2>
+                            <div class="filter-controls" style="display: flex; gap: 10px; align-items: center;">
+                                <select id="hotPapersJournalSelect" class="styled-select" style="min-width: 150px;">
+                                    <option value="">加载期刊中...</option>
+                                </select>
+                                <select id="hotPapersPeriodSelect" class="styled-select" style="min-width: 120px;">
+                                    <option value="30" selected>最近一个月</option>
+                                    <option value="180">最近半年</option>
+                                    <option value="365">最近一年</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="statistics-card" style="padding: 24px; position: relative; min-height: 200px;">
+                            <div id="hotPapersTableContainer">
+                                <!-- 热门论文表格或加载状态 -->
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- 热门关键词独占一行 -->
                     <div class="statistics-section" id="hotKeywordsSection" style="margin-top: 30px;">
                         <h2 style="margin-bottom: 20px;">
