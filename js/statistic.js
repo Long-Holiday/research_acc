@@ -28,6 +28,7 @@ let keywordChartInstance = null;
 let currentKeywordsData = [];
 let currentDistDimension = 'category';
 let currentTrendYType = 'rate'; // 'rate' or 'count'
+window.globalSmoothness = 0;
 
 // Categories names are displayed directly from data keys to match the main page
 
@@ -170,6 +171,19 @@ function initEventListeners() {
       closeSidebar();
     }
   });
+
+  // 趋势平滑度滑动条事件监听
+  const smoothSlider = document.getElementById('trendSmoothSlider');
+  const smoothValueDisplay = document.getElementById('trendSmoothValue');
+  if (smoothSlider && smoothValueDisplay) {
+    smoothSlider.addEventListener('input', (e) => {
+      window.globalSmoothness = parseFloat(e.target.value);
+      smoothValueDisplay.textContent = window.globalSmoothness.toFixed(2);
+      if (window.updateTrendChart) {
+        window.updateTrendChart();
+      }
+    });
+  }
 }
 
 // Function to detect preferred language based on browser settings
@@ -752,17 +766,8 @@ async function renderCategoryStats(categories, validDatesInRange) {
 
     // 5. 加载并渲染网络图
     if (netContainer) {
-      setTimeout(async () => {
-        try {
-          const networkUrl = `/api/stats/network?start_date=${encodeURIComponent(globalStartDate)}&end_date=${encodeURIComponent(globalEndDate)}&lang=${encodeURIComponent(globalLang)}&category=${encodeURIComponent(categoryParam)}`;
-          const netResponse = await Auth.fetchWithAuth(networkUrl);
-          if (!netResponse.ok) throw new Error("Failed to fetch network data");
-          window.currentNetworkData = await netResponse.json();
-          updateCharts(); // Re-render to include network
-        } catch (netErr) {
-          console.error("加载网络图失败:", netErr);
-          netContainer.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-secondary);">加载网络图失败 / Failed to load network: ${netErr.message}</div>`;
-        }
+      setTimeout(() => {
+        loadAndRenderNetwork(categoryParam);
       }, 50);
     }
 
@@ -778,6 +783,32 @@ async function renderCategoryStats(categories, validDatesInRange) {
     if (trendChartCard) trendChartCard.innerHTML = errorHTML;
     if (distSection) distSection.style.display = 'none';
     if (netContainer) netContainer.innerHTML = '<div style="padding:20px;text-align:center;color:red;">加载共现网络失败。</div>';
+  }
+}
+
+async function loadAndRenderNetwork(categoryParam) {
+  const netContainer = document.getElementById('networkContainer');
+  if (!netContainer) return;
+  
+  try {
+    const savedExcludesRaw = localStorage.getItem('excludedKeywords');
+    const savedExcludes = savedExcludesRaw ? JSON.parse(savedExcludesRaw) : [];
+    
+    let networkUrl = `/api/stats/network?start_date=${encodeURIComponent(globalStartDate)}&end_date=${encodeURIComponent(globalEndDate)}&lang=${encodeURIComponent(globalLang)}&category=${encodeURIComponent(categoryParam)}`;
+    if (savedExcludes.length > 0) {
+      networkUrl += `&exclude=${encodeURIComponent(savedExcludes.join(','))}`;
+    }
+    
+    const netResponse = await Auth.fetchWithAuth(networkUrl);
+    if (!netResponse.ok) throw new Error("Failed to fetch network data");
+    window.currentNetworkData = await netResponse.json();
+    
+    if (window.updateCharts) {
+      window.updateCharts();
+    }
+  } catch (netErr) {
+    console.error("加载网络图失败:", netErr);
+    netContainer.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-secondary);">加载网络图失败 / Failed to load network: ${netErr.message}</div>`;
   }
 }
 
@@ -829,7 +860,70 @@ function updateExcludeKeywords() {
   if (window.updateCharts) {
     window.updateCharts();
   }
+
+  // 重新加载并渲染共现网络图
+  const isAll = selectedCategories.includes('All');
+  const categoryParam = isAll ? 'All' : selectedCategories.join(',');
+  loadAndRenderNetwork(categoryParam);
 }
+
+window.updateTrendChart = function() {
+  const trendChartCard = document.getElementById('trendChartCard');
+  if (!trendChartCard || !window.currentDailyTrends || !currentKeywordsData) return;
+
+  const savedExcludesRaw = localStorage.getItem('excludedKeywords');
+  const savedExcludes = savedExcludesRaw ? JSON.parse(savedExcludesRaw) : [];
+  const excludedSet = new Set(savedExcludes);
+
+  const keywords = currentKeywordsData.filter(kw => !excludedSet.has(kw.keyword));
+  
+  if (keywords.length === 0) {
+      trendChartCard.innerHTML = '<div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);"><p>暂无趋势图 / No trend data after filtering.</p></div>';
+      return;
+  }
+
+  const sortedKeywordsForTrend = [...keywords].sort((a, b) => {
+    if (currentTrendYType === 'count') {
+      return (b.count || 0) - (a.count || 0);
+    } else {
+      return (b.rate || 0) - (a.rate || 0);
+    }
+  });
+  const top10Keywords = sortedKeywordsForTrend.slice(0, 10).map(d => d.keyword);
+  const trendMap = new Map();
+  top10Keywords.forEach(k => trendMap.set(k, []));
+  
+  window.currentDailyTrends.forEach(item => {
+    if (trendMap.has(item.keyword)) {
+      const rate = item.rate || 0;
+      trendMap.get(item.keyword).push({
+        date: new Date(item.date + 'T00:00:00Z'),
+        count: item.count,
+        rate: rate,
+        value: currentTrendYType === 'count' ? item.count : rate
+      });
+    }
+  });
+  
+  const trendData = Array.from(trendMap.entries()).map(([keyword, values]) => ({
+    keyword: keyword,
+    values: values.sort((a, b) => a.date - b.date)
+  }));
+
+  if (window.currentValidDatesInRange && window.currentValidDatesInRange.length > 1 && top10Keywords.length > 0) {
+    trendChartCard.innerHTML = `<div id="trendChart" style="width: 100%; height: 100%;"></div>`;
+    setTimeout(() => {
+      drawTrendChart(trendData, window.currentValidDatesInRange);
+    }, 50);
+  } else {
+    trendChartCard.innerHTML = `
+      <div class="no-data" style="text-align: center; color: var(--text-secondary); line-height: 1.6; font-size: 14px; padding: 20px;">
+        📈 暂无趋势图：趋势图需要选择至少两天的数据来进行对比分析。<br>
+        Current selection contains only 1 day of data. Trend chart requires at least 2 days of data.
+      </div>
+    `;
+  }
+};
 
 window.updateCharts = function() {
   if (!currentKeywordsData) return;
@@ -875,50 +969,7 @@ window.updateCharts = function() {
   }
 
   // 2. Trend Chart
-  const trendChartCard = document.getElementById('trendChartCard');
-  if (trendChartCard && window.currentDailyTrends) {
-    const sortedKeywordsForTrend = [...keywords].sort((a, b) => {
-      if (currentTrendYType === 'count') {
-        return (b.count || 0) - (a.count || 0);
-      } else {
-        return (b.rate || 0) - (a.rate || 0);
-      }
-    });
-    const top10Keywords = sortedKeywordsForTrend.slice(0, 10).map(d => d.keyword);
-    const trendMap = new Map();
-    top10Keywords.forEach(k => trendMap.set(k, []));
-    
-    window.currentDailyTrends.forEach(item => {
-      if (trendMap.has(item.keyword)) {
-        const rate = item.rate || 0;
-        trendMap.get(item.keyword).push({
-          date: new Date(item.date + 'T00:00:00Z'),
-          count: item.count,
-          rate: rate,
-          value: currentTrendYType === 'count' ? item.count : rate
-        });
-      }
-    });
-    
-    const trendData = Array.from(trendMap.entries()).map(([keyword, values]) => ({
-      keyword: keyword,
-      values: values.sort((a, b) => a.date - b.date)
-    }));
-
-    if (window.currentValidDatesInRange && window.currentValidDatesInRange.length > 1 && top10Keywords.length > 0) {
-      trendChartCard.innerHTML = `<div id="trendChart" style="width: 100%; height: 100%;"></div>`;
-      setTimeout(() => {
-        drawTrendChart(trendData, window.currentValidDatesInRange);
-      }, 50);
-    } else {
-      trendChartCard.innerHTML = `
-        <div class="no-data" style="text-align: center; color: var(--text-secondary); line-height: 1.6; font-size: 14px; padding: 20px;">
-          📈 暂无趋势图：趋势图需要选择至少两天的数据来进行对比分析。<br>
-          Current selection contains only 1 day of data. Trend chart requires at least 2 days of data.
-        </div>
-      `;
-    }
-  }
+  window.updateTrendChart();
 
   // 3. Distribution Chart
   const distSection = document.getElementById('keywordDistributionSection');
@@ -959,8 +1010,8 @@ function changeTrendYType(type) {
   currentTrendYType = type;
   updateTrendYUI(type);
   
-  if (window.updateCharts) {
-    window.updateCharts();
+  if (window.updateTrendChart) {
+    window.updateTrendChart();
   }
 }
 
@@ -1186,6 +1237,39 @@ function drawTrendChart(trendData, validDatesInRange) {
     return;
   }
 
+  // 指数平滑 (EMA) 算法计算
+  const alpha = 1 - (window.globalSmoothness || 0);
+  const smoothedTrendData = trendData.map(d => {
+    const originalValues = d.values;
+    if (originalValues.length === 0) return { keyword: d.keyword, values: [] };
+    
+    const smoothedValues = [];
+    
+    // 第一个值作为初始值
+    smoothedValues.push({
+      ...originalValues[0],
+      originalValue: originalValues[0].value,
+      value: originalValues[0].value
+    });
+    
+    for (let i = 1; i < originalValues.length; i++) {
+      const prevSmoothed = smoothedValues[i - 1].value;
+      const currOriginal = originalValues[i].value;
+      const smoothedVal = alpha * currOriginal + (1 - alpha) * prevSmoothed;
+      
+      smoothedValues.push({
+        ...originalValues[i],
+        originalValue: currOriginal,
+        value: smoothedVal
+      });
+    }
+    
+    return {
+      keyword: d.keyword,
+      values: smoothedValues
+    };
+  });
+
   const margin = {top: 20, right: 180, bottom: 80, left: 60};
   const width = Math.max(100, chartElement.offsetWidth - margin.left - margin.right);
   const height = 400 - margin.top - margin.bottom;
@@ -1205,7 +1289,7 @@ function drawTrendChart(trendData, validDatesInRange) {
     .domain(d3.extent(validDatesInRange, d => new Date(d + 'T00:00:00Z')))
     .range([0, width]);
 
-  const maxY = d3.max(trendData, d => d3.max(d.values, v => v.value)) || 1;
+  const maxY = d3.max(smoothedTrendData, d => d3.max(d.values, v => v.value)) || 1;
   const y = d3.scaleLinear()
     .domain([0, maxY])
     .nice()
@@ -1344,7 +1428,7 @@ function drawTrendChart(trendData, validDatesInRange) {
   // 添加渐变定义
   const gradient = svg.append("defs")
     .selectAll("linearGradient")
-    .data(trendData)
+    .data(smoothedTrendData)
     .enter()
     .append("linearGradient")
     .attr("id", (d, i) => `gradient-${i}`)
@@ -1365,7 +1449,7 @@ function drawTrendChart(trendData, validDatesInRange) {
 
   // 绘制面积
   const areas = svg.selectAll('.area')
-    .data(trendData)
+    .data(smoothedTrendData)
     .enter()
     .append('path')
       .attr('class', 'area')
@@ -1375,7 +1459,7 @@ function drawTrendChart(trendData, validDatesInRange) {
 
   // 绘制折线
   const paths = svg.selectAll('.line')
-    .data(trendData)
+    .data(smoothedTrendData)
     .enter()
     .append('path')
       .attr('class', 'line')
@@ -1394,7 +1478,7 @@ function drawTrendChart(trendData, validDatesInRange) {
 
   // 绘制折线节点圆点，增加细节感与交互性
   const dotsG = svg.append('g').attr('class', 'dots-group');
-  trendData.forEach((d, i) => {
+  smoothedTrendData.forEach((d, i) => {
     dotsG.selectAll(`.dot-${i}`)
       .data(d.values)
       .enter()
@@ -1413,13 +1497,21 @@ function drawTrendChart(trendData, validDatesInRange) {
           tooltip.transition().duration(100).style("opacity", 0.95);
           
           const dateStr = v.date.toISOString().split('T')[0];
-          const formattedVal = currentTrendYType === 'count' ? v.count : (v.rate.toFixed(2) + '%');
           const displayLabel = currentTrendYType === 'count' ? '频次' : '频率';
-          tooltip.html(`
+          const originalValStr = currentTrendYType === 'count' ? Math.round(v.originalValue) : (v.originalValue.toFixed(2) + '%');
+          const smoothedValStr = currentTrendYType === 'count' ? Math.round(v.value) : (v.value.toFixed(2) + '%');
+          
+          let tooltipHtml = `
             <div style="font-weight: bold; margin-bottom: 4px;">${d.keyword}</div>
-            <div>日期: ${dateStr}</div>
-            <div>${displayLabel}: ${formattedVal}</div>
-          `);
+            <div style="margin-bottom: 2px;">日期: ${dateStr}</div>
+            <div style="margin-bottom: 2px;">原始${displayLabel}: ${originalValStr}</div>
+          `;
+          
+          if (window.globalSmoothness > 0) {
+            tooltipHtml += `<div style="color: #38bdf8; font-weight: 500;">平滑${displayLabel}: ${smoothedValStr}</div>`;
+          }
+          
+          tooltip.html(tooltipHtml);
         })
         .on('mousemove', function(event) {
           const matrix = d3.pointer(event, chartElement);
@@ -1435,7 +1527,7 @@ function drawTrendChart(trendData, validDatesInRange) {
 
   // 添加图例
   const legend = svg.selectAll('.legend')
-    .data(trendData)
+    .data(smoothedTrendData)
     .enter()
     .append('g')
       .attr('class', 'legend')
@@ -1462,7 +1554,7 @@ function drawTrendChart(trendData, validDatesInRange) {
   legend.style('cursor', 'pointer')
     .on('mouseover', function(event, d) {
       const keyword = d.keyword;
-      const targetIndex = trendData.findIndex(item => item.keyword === keyword);
+      const targetIndex = smoothedTrendData.findIndex(item => item.keyword === keyword);
       
       areas.style('opacity', 0.05);
       paths.style('opacity', 0.1);

@@ -205,6 +205,14 @@ def test_stats_apis():
         node_ids = [n["id"] for n in net_data["nodes"]]
         assert "graphs" in node_ids or "enterprise" in node_ids
         
+        # Test that exclude parameter correctly filters out nodes in network
+        response = client.get("/api/stats/network?start_date=2026-07-09&end_date=2026-07-09&lang=Chinese&category=All&exclude=graphs,enterprise", headers=headers)
+        assert response.status_code == 200
+        net_data_exclude = response.json()
+        node_ids_exclude = [n["id"] for n in net_data_exclude["nodes"]]
+        assert "graphs" not in node_ids_exclude
+        assert "enterprise" not in node_ids_exclude
+        
     finally:
         if os.path.exists(test_file):
             os.remove(test_file)

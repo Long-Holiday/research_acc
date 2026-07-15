@@ -284,6 +284,7 @@ def get_network_stats(
     end_date: str, 
     lang: str = "en", 
     category: str = "All", 
+    exclude: str = "",
     token: str = Depends(verify_token)
 ):
     try:
@@ -298,17 +299,28 @@ def get_network_stats(
     try:
         cursor = conn.cursor()
         
+        exclude_list = []
+        if exclude:
+            exclude_list = [w.strip() for w in exclude.split(",") if w.strip()]
+            
+        exclude_clause = ""
+        exclude_params = []
+        if exclude_list:
+            exclude_clause = "AND keyword NOT IN (" + ",".join(["?"] * len(exclude_list)) + ")"
+            exclude_params = exclude_list
+        
         if category == 'All':
-            query = """
+            query = f"""
             SELECT keyword, SUM(frequency) as total
             FROM keyword_stats
             WHERE paper_date BETWEEN ? AND ?
               AND language = ?
+              {exclude_clause}
             GROUP BY keyword
             ORDER BY total DESC
             LIMIT 35
             """
-            params = [start_date, end_date, lang]
+            params = [start_date, end_date, lang] + exclude_params
         else:
             categories = category.split(',')
             placeholders = ','.join(['?'] * len(categories))
@@ -318,11 +330,12 @@ def get_network_stats(
             WHERE paper_date BETWEEN ? AND ?
               AND language = ?
               AND category IN ({placeholders})
+              {exclude_clause}
             GROUP BY keyword
             ORDER BY total DESC
             LIMIT 35
             """
-            params = [start_date, end_date, lang] + categories
+            params = [start_date, end_date, lang] + categories + exclude_params
             
         cursor.execute(query, params)
         nodes_rows = cursor.fetchall()
