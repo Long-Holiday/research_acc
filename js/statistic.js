@@ -952,19 +952,26 @@ window.updateCharts = function() {
   }));
 
   if (hotKeywordsList) {
-    // 找出当前显示的关键词中，增长率排名前 5 且增长率大于 0 的关键词
+    // 找出当前显示的关键词中，增长率排名前 5 的关键词（包括负增长）
     const sortedByGrowth = [...displayedKeywords]
-      .filter(item => item.growth_rate && item.growth_rate > 0)
-      .sort((a, b) => b.growth_rate - a.growth_rate);
+      .sort((a, b) => {
+        const rateA = (a.growth_rate !== undefined && a.growth_rate !== null) ? a.growth_rate : -Infinity;
+        const rateB = (b.growth_rate !== undefined && b.growth_rate !== null) ? b.growth_rate : -Infinity;
+        return rateB - rateA;
+      });
     const top5Keywords = new Set(sortedByGrowth.slice(0, 5).map(item => item.keyword));
 
     hotKeywordsList.innerHTML = displayedKeywords.map((item, index) => {
       const isTop5 = top5Keywords.has(item.keyword);
       const isGreaterThanPointTwo = item.growth_rate && item.growth_rate > 0.2;
       const showBadge = isTop5 || isGreaterThanPointTwo;
-      const growthBadge = showBadge
-        ? `<span class="growth-badge">+${Math.round(item.growth_rate * 100)}% 🔥</span>`
-        : '';
+      
+      let growthBadge = '';
+      if (showBadge) {
+        const rateVal = Math.round((item.growth_rate || 0) * 100);
+        const rateText = rateVal >= 0 ? `+${rateVal}%` : `${rateVal}%`;
+        growthBadge = `<span class="growth-badge">${rateText} 🔥</span>`;
+      }
       return `
         <div class="keyword-item" onclick="showRelatedPapers('${escapeHtml(item.keyword)}')">
           <span class="keyword-rank">${index + 1}</span>
