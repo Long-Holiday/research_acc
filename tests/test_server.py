@@ -274,29 +274,99 @@ def test_hot_papers_apis():
     old_password = server.ACCESS_PASSWORD
     server.ACCESS_PASSWORD = "testpassword"
     
-    response = client.post("/api/auth/login", json={"password": "testpassword"})
-    assert response.status_code == 200
-    token = response.json()["token"]
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    # 1. 测试获取期刊接口
-    response = client.get("/api/stats/journals", headers=headers)
-    assert response.status_code == 200
-    journals = response.json()
-    assert len(journals) > 0
-    assert "TGRS" in [j["name"] for j in journals]
-    
-    # 2. 测试获取热门论文（模拟 OpenAlex 查询或确保缓存及接口能正常响应）
-    response = client.get("/api/stats/hot-papers?journal=TGRS&period=30", headers=headers)
-    assert response.status_code in [200, 500] # 如果没配置 API key 或访问不通可能报 500
-    
-    # 测试非法 period
-    response = client.get("/api/stats/hot-papers?journal=TGRS&period=5", headers=headers)
-    assert response.status_code == 400
-    
-    # 测试非法 journal
-    response = client.get("/api/stats/hot-papers?journal=INVALID&period=30", headers=headers)
-    assert response.status_code == 404
-    
-    server.ACCESS_PASSWORD = old_password
+    try:
+        # Clear stats database to ensure a clean slate
+        db_path = "data/statistics.db"
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+            except Exception:
+                pass
+        
+        # Create database and hot_papers_cache table for test environment
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        conn = server.connect_db(db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS hot_papers_cache (
+            journal TEXT,
+            period INTEGER,
+            query_date TEXT,
+            papers_json TEXT,
+            PRIMARY KEY (journal, period, query_date)
+        )
+        """)
+        conn.commit()
+        conn.close()
+
+        response = client.post("/api/auth/login", json={"password": "testpassword"})
+        assert response.status_code == 200
+        token = response.json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # 1. 测试获取期刊接口
+        response = client.get("/api/stats/journals", headers=headers)
+        assert response.status_code == 200
+        journals = response.json()
+        assert len(journals) > 0
+        assert "TGRS" in [j["name"] for j in journals]
+        
+        # 2. 测试获取热门论文（模拟 OpenAlex 查询或确保缓存及接口能正常响应）
+        from unittest.mock import patch, MagicMock
+        
+        mock_response_data = {
+            "results": [
+                {
+                    "id": "https://openalex.org/W12345",
+                    "title": "Mocked Hot Paper",
+                    "authorships": [
+                        {
+                            "author": {
+                                "display_name": "John Doe"
+                            }
+                        }
+                    ],
+                    "cited_by_count": 42,
+                    "doi": "https://doi.org/10.1000/xyz123",
+                    "primary_location": {
+                        "landing_page_url": "https://example.com/mocked"
+                    },
+                    "publication_date": "2026-07-01"
+                }
+            ]
+        }
+        
+        with patch("requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = mock_response_data
+            mock_get.return_value = mock_resp
+            
+            response = client.get("/api/stats/hot-papers?journal=TGRS&period=30", headers=headers)
+            assert response.status_code == 200
+            papers = response.json()
+            assert len(papers) == 1
+            assert papers[0]["title"] == "Mocked Hot Paper"
+            assert papers[0]["authors"] == "John Doe"
+            assert papers[0]["cited_by_count"] == 42
+            assert papers[0]["url"] == "https://doi.org/10.1000/xyz123"
+            assert papers[0]["publication_date"] == "2026-07-01"
+            mock_get.assert_called_once()
+        
+        # 测试非法 period
+        response = client.get("/api/stats/hot-papers?journal=TGRS&period=5", headers=headers)
+        assert response.status_code == 400
+        
+        # 测试非法 journal
+        response = client.get("/api/stats/hot-papers?journal=INVALID&period=30", headers=headers)
+        assert response.status_code == 404
+    finally:
+        db_path = "data/statistics.db"
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+            except Exception:
+                pass
+        server.ACCESS_PASSWORD = old_password
+
 

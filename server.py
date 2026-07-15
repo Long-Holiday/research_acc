@@ -163,6 +163,25 @@ def startup_event():
         print(f"Error during startup scanning: {e}")
         
     try:
+        db_path = "data/statistics.db"
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        conn = connect_db(db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS hot_papers_cache (
+            journal TEXT,
+            period INTEGER,
+            query_date TEXT,
+            papers_json TEXT,
+            PRIMARY KEY (journal, period, query_date)
+        )
+        """)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error creating hot_papers_cache table on startup: {e}")
+        
+    try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             loop.create_task(clean_expired_sessions_loop())
@@ -422,23 +441,25 @@ def fetch_top_papers_from_openalex(issn_list, from_date):
     
     formatted_papers = []
     for paper in results:
-        title = paper.get("title", "Untitled")
+        title = paper.get("title") or "Untitled"
         
         authors_list = []
-        for authorship in paper.get("authorships", []):
-            author_name = authorship.get("author", {}).get("display_name")
-            if author_name:
-                authors_list.append(author_name)
+        for authorship in (paper.get("authorships") or []):
+            if isinstance(authorship, dict):
+                author_name = (authorship.get("author") or {}).get("display_name")
+                if author_name:
+                    authors_list.append(author_name)
         authors_str = ", ".join(authors_list[:5])
         if len(authors_list) > 5:
             authors_str += " et al."
             
-        cited_by = paper.get("cited_by_count", 0)
-        paper_url = paper.get("doi") or paper.get("primary_location", {}).get("landing_page_url") or ""
-        pub_date = paper.get("publication_date", "")
+        cited_by = paper.get("cited_by_count") or 0
+        primary_loc = paper.get("primary_location") or {}
+        paper_url = paper.get("doi") or (primary_loc.get("landing_page_url") if isinstance(primary_loc, dict) else "") or ""
+        pub_date = paper.get("publication_date") or ""
         
         formatted_papers.append({
-            "id": paper.get("id", ""),
+            "id": paper.get("id") or "",
             "title": title,
             "authors": authors_str,
             "cited_by_count": cited_by,
@@ -474,17 +495,6 @@ def get_hot_papers(journal: str, period: int, token: str = Depends(verify_token)
     
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS hot_papers_cache (
-            journal TEXT,
-            period INTEGER,
-            query_date TEXT,
-            papers_json TEXT,
-            PRIMARY KEY (journal, period, query_date)
-        )
-        """)
-        conn.commit()
-        
         cursor.execute("""
         SELECT papers_json FROM hot_papers_cache
         WHERE journal = ? AND period = ? AND query_date = ?
