@@ -26,6 +26,7 @@ let globalLang = 'en';
 let keywordChartInstance = null;
 let currentKeywordsData = [];
 let currentDistDimension = 'category';
+let currentTrendYType = 'rate'; // 'rate' or 'count'
 
 // Categories names are displayed directly from data keys to match the main page
 
@@ -879,11 +880,31 @@ window.updateCharts = function() {
     const trendMap = new Map();
     top10Keywords.forEach(k => trendMap.set(k, []));
     
+    // Filter papers for the selected categories
+    const isAll = selectedCategories.includes('All');
+    const filteredPapers = isAll 
+      ? allPapersData 
+      : allPapersData.filter(paper => paper.category && selectedCategories.includes(paper.category[0]));
+
     window.currentDailyTrends.forEach(item => {
       if (trendMap.has(item.keyword)) {
+        const dateStr = item.date;
+        const papersOnDate = filteredPapers.filter(p => p.date === dateStr);
+        const totalPapersOnDate = papersOnDate.length;
+        
+        // Count how many of these papers contain the keyword
+        const papersWithKeyword = papersOnDate.filter(p => {
+          const searchText = (p.title + ' ' + p.summary).toLowerCase();
+          return searchText.includes(item.keyword.toLowerCase());
+        }).length;
+        
+        const rate = totalPapersOnDate > 0 ? parseFloat(((papersWithKeyword / totalPapersOnDate) * 100).toFixed(2)) : 0;
+        
         trendMap.get(item.keyword).push({
           date: new Date(item.date + 'T00:00:00Z'),
-          count: item.count
+          count: item.count,
+          rate: rate,
+          value: currentTrendYType === 'count' ? item.count : rate
         });
       }
     });
@@ -939,6 +960,40 @@ function changeDistDimension(dimension) {
   
   if (window.updateCharts) {
     window.updateCharts();
+  }
+}
+
+function changeTrendYType(type) {
+  if (currentTrendYType === type) return;
+  currentTrendYType = type;
+  updateTrendYUI(type);
+  
+  if (window.updateCharts) {
+    window.updateCharts();
+  }
+}
+
+function updateTrendYUI(type) {
+  const btnRate = document.getElementById('btnTrendYRate');
+  const btnCount = document.getElementById('btnTrendYCount');
+  if (!btnRate || !btnCount) return;
+  
+  if (type === 'rate') {
+    btnRate.style.background = 'var(--card-bg-color, #ffffff)';
+    btnRate.style.color = 'var(--text-color, #1e293b)';
+    btnRate.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+    
+    btnCount.style.background = 'transparent';
+    btnCount.style.color = 'var(--text-secondary, #64748b)';
+    btnCount.style.boxShadow = 'none';
+  } else {
+    btnCount.style.background = 'var(--card-bg-color, #ffffff)';
+    btnCount.style.color = 'var(--text-color, #1e293b)';
+    btnCount.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+    
+    btnRate.style.background = 'transparent';
+    btnRate.style.color = 'var(--text-secondary, #64748b)';
+    btnRate.style.boxShadow = 'none';
   }
 }
 
@@ -1159,7 +1214,7 @@ function drawTrendChart(trendData, validDatesInRange) {
     .domain(d3.extent(validDatesInRange, d => new Date(d + 'T00:00:00Z')))
     .range([0, width]);
 
-  const maxY = d3.max(trendData, d => d3.max(d.values, v => v.count)) || 1;
+  const maxY = d3.max(trendData, d => d3.max(d.values, v => v.value)) || 1;
   const y = d3.scaleLinear()
     .domain([0, maxY])
     .nice()
@@ -1232,15 +1287,20 @@ function drawTrendChart(trendData, validDatesInRange) {
     .attr("transform", "rotate(-45)");
 
   // 添加Y轴
+  const yAxis = d3.axisLeft(y).ticks(5);
+  if (currentTrendYType === 'rate') {
+    yAxis.tickFormat(d => d + '%');
+  }
+
   svg.append('g')
     .attr('class', 'y-axis')
-    .call(d3.axisLeft(y)
-      .ticks(5))
+    .call(yAxis)
     .selectAll("text")
     .style("font-size", "11px")
     .style("fill", "#666");
 
   // 添加Y轴标题
+  const yAxisLabelText = currentTrendYType === 'count' ? "出现频次 (Frequency)" : "出现频率 (Frequency Rate)";
   svg.append("text")
     .attr("transform", "rotate(-90)")
     .attr("y", 0 - margin.left)
@@ -1249,7 +1309,7 @@ function drawTrendChart(trendData, validDatesInRange) {
     .style("text-anchor", "middle")
     .style("fill", "#666")
     .style("font-size", "11px")
-    .text("出现频次 (Frequency)");
+    .text(yAxisLabelText);
 
   // 添加X轴标题
   const latestDate = new Date(validDatesInRange[0] + 'T00:00:00Z');
@@ -1281,13 +1341,13 @@ function drawTrendChart(trendData, validDatesInRange) {
   const area = d3.area()
     .x(d => x(d.date))
     .y0(height)
-    .y1(d => y(d.count))
+    .y1(d => y(d.value))
     .curve(d3.curveMonotoneX);
 
   // 定义线条生成器
   const line = d3.line()
     .x(d => x(d.date))
-    .y(d => y(d.count))
+    .y(d => y(d.value))
     .curve(d3.curveMonotoneX);
 
   // 添加渐变定义
@@ -1334,7 +1394,14 @@ function drawTrendChart(trendData, validDatesInRange) {
       .style('stroke-width', 2.5)
       .style('opacity', 0.85);
 
-  // 绘制折线节点圆点，增加细节感
+  // 创建提示框元素 (trend tooltip)
+  const tooltip = d3.select(chartElement).append("div")
+    .attr("class", "network-tooltip")
+    .style("position", "absolute")
+    .style("z-index", "100")
+    .style("pointer-events", "none");
+
+  // 绘制折线节点圆点，增加细节感与交互性
   const dotsG = svg.append('g').attr('class', 'dots-group');
   trendData.forEach((d, i) => {
     dotsG.selectAll(`.dot-${i}`)
@@ -1343,11 +1410,36 @@ function drawTrendChart(trendData, validDatesInRange) {
       .append('circle')
         .attr('class', `dot dot-${i}`)
         .attr('cx', v => x(v.date))
-        .attr('cy', v => y(v.count))
-        .attr('r', 3)
+        .attr('cy', v => y(v.value))
+        .attr('r', 4)
         .style('fill', color(d.keyword))
         .style('opacity', 0)
-        .style('transition', 'opacity 0.2s ease');
+        .style('transition', 'opacity 0.2s ease, r 0.2s ease')
+        .style('cursor', 'pointer')
+        .style('pointer-events', 'all')
+        .on('mouseover', function(event, v) {
+          d3.select(this).style('opacity', 1).attr('r', 6);
+          tooltip.transition().duration(100).style("opacity", 0.95);
+          
+          const dateStr = v.date.toISOString().split('T')[0];
+          const formattedVal = currentTrendYType === 'count' ? v.count : (v.rate.toFixed(2) + '%');
+          const displayLabel = currentTrendYType === 'count' ? '频次' : '频率';
+          tooltip.html(`
+            <div style="font-weight: bold; margin-bottom: 4px;">${d.keyword}</div>
+            <div>日期: ${dateStr}</div>
+            <div>${displayLabel}: ${formattedVal}</div>
+          `);
+        })
+        .on('mousemove', function(event) {
+          const matrix = d3.pointer(event, chartElement);
+          tooltip
+            .style("left", (matrix[0] + 15) + "px")
+            .style("top", (matrix[1] - 40) + "px");
+        })
+        .on('mouseout', function() {
+          d3.select(this).style('opacity', 0).attr('r', 4);
+          tooltip.transition().duration(100).style("opacity", 0);
+        });
   });
 
   // 添加图例
@@ -1401,7 +1493,7 @@ function drawTrendChart(trendData, validDatesInRange) {
     .on('mouseout', function() {
       areas.style('opacity', 0.6);
       paths.style('opacity', 0.85).style('stroke-width', 2.5);
-      svg.selectAll('.dot').style('opacity', 0).attr('r', 3);
+      svg.selectAll('.dot').style('opacity', 0).attr('r', 4);
     });
 }
 
