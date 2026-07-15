@@ -945,14 +945,24 @@ window.updateCharts = function() {
   }
 
   // 1. Hot Keywords
-  const keywordCloudData = keywords.slice(0, 30).map(item => ({
+  const displayedKeywords = keywords.slice(0, 30);
+  const keywordCloudData = displayedKeywords.map(item => ({
     text: item.keyword,
     size: Math.max(12, Math.min(50, item.count * 3))
   }));
 
   if (hotKeywordsList) {
-    hotKeywordsList.innerHTML = keywords.slice(0, 30).map((item, index) => {
-      const growthBadge = item.growth_rate && item.growth_rate > 0.2
+    // 找出当前显示的关键词中，增长率排名前 5 且增长率大于 0 的关键词
+    const sortedByGrowth = [...displayedKeywords]
+      .filter(item => item.growth_rate && item.growth_rate > 0)
+      .sort((a, b) => b.growth_rate - a.growth_rate);
+    const top5Keywords = new Set(sortedByGrowth.slice(0, 5).map(item => item.keyword));
+
+    hotKeywordsList.innerHTML = displayedKeywords.map((item, index) => {
+      const isTop5 = top5Keywords.has(item.keyword);
+      const isGreaterThanPointTwo = item.growth_rate && item.growth_rate > 0.2;
+      const showBadge = isTop5 || isGreaterThanPointTwo;
+      const growthBadge = showBadge
         ? `<span class="growth-badge">+${Math.round(item.growth_rate * 100)}% 🔥</span>`
         : '';
       return `
