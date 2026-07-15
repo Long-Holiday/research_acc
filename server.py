@@ -27,6 +27,8 @@ for k in os.environ:
 ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD", "")
 active_sessions = {}  # token -> expiry_timestamp
 
+DB_PATH = "data/statistics.db"
+
 class LoginRequest(BaseModel):
     password: str
 
@@ -115,11 +117,10 @@ def get_papers_range(
     except Exception as e:
         print(f"Error scanning files dynamically: {e}")
         
-    db_path = "data/statistics.db"
-    if not os.path.exists(db_path):
+    if not os.path.exists(DB_PATH):
         return []
         
-    conn = connect_db(db_path)
+    conn = connect_db(DB_PATH)
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -163,9 +164,8 @@ def startup_event():
         print(f"Error during startup scanning: {e}")
         
     try:
-        db_path = "data/statistics.db"
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        conn = connect_db(db_path)
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        conn = connect_db(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS hot_papers_cache (
@@ -203,11 +203,10 @@ def get_keyword_stats(
     except Exception as e:
         print(f"Error scanning files dynamically: {e}")
         
-    db_path = "data/statistics.db"
-    if not os.path.exists(db_path):
+    if not os.path.exists(DB_PATH):
         return {"keywords": [], "daily_trends": []}
         
-    conn = connect_db(db_path)
+    conn = connect_db(DB_PATH)
     try:
         cursor = conn.cursor()
         
@@ -317,11 +316,10 @@ def get_network_stats(
     except Exception as e:
         print(f"Error scanning files dynamically: {e}")
         
-    db_path = "data/statistics.db"
-    if not os.path.exists(db_path):
+    if not os.path.exists(DB_PATH):
         return {"nodes": [], "links": []}
         
-    conn = connect_db(db_path)
+    conn = connect_db(DB_PATH)
     try:
         cursor = conn.cursor()
         
@@ -487,9 +485,8 @@ def get_hot_papers(journal: str, period: int, token: str = Depends(verify_token)
     if not selected_journal:
         raise HTTPException(status_code=404, detail=f"Journal '{journal}' not found in configuration.")
     
-    db_path = "data/statistics.db"
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = connect_db(db_path)
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = connect_db(DB_PATH)
     
     today_str = datetime.now().strftime("%Y-%m-%d")
     

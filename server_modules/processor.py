@@ -6,6 +6,8 @@ import threading
 from server_modules.database import connect_db
 import server_modules.keywords as keywords
 
+DB_PATH = "data/statistics.db"
+
 db_lock = threading.Lock()
 processed_files_cache = set()
 cache_initialized = False
@@ -14,9 +16,7 @@ def scan_and_process_files():
     global cache_initialized
     db_dir = "data"
     os.makedirs(db_dir, exist_ok=True)
-    db_path = os.path.join(db_dir, "statistics.db")
-    
-    if not os.path.exists(db_path):
+    if not os.path.exists(DB_PATH):
         processed_files_cache.clear()
         cache_initialized = False
     
@@ -35,7 +35,7 @@ def scan_and_process_files():
             return  # No new files to process! Skip entire database lock & queries.
             
     with db_lock:
-        conn = connect_db(db_path)
+        conn = connect_db(DB_PATH)
         try:
             cursor = conn.cursor()
             

@@ -40,8 +40,16 @@ def test_static_files():
 def test_auth_and_data_apis():
     # Configure fake password
     import server
+    import server_modules.processor as processor
+    
     old_password = server.ACCESS_PASSWORD
     server.ACCESS_PASSWORD = "testpassword"
+    
+    # Redirect DB paths to temp test database
+    old_server_db_path = server.DB_PATH
+    old_processor_db_path = processor.DB_PATH
+    server.DB_PATH = "data/test_statistics.db"
+    processor.DB_PATH = "data/test_statistics.db"
     
     # Unauthenticated access should fail
     response = client.get("/api/dates")
@@ -118,6 +126,15 @@ def test_auth_and_data_apis():
     finally:
         if os.path.exists(test_file):
             os.remove(test_file)
+        # Clean up test database
+        if os.path.exists("data/test_statistics.db"):
+            try:
+                os.remove("data/test_statistics.db")
+            except Exception:
+                pass
+        # Restore DB paths
+        server.DB_PATH = old_server_db_path
+        processor.DB_PATH = old_processor_db_path
         # Restore ACCESS_PASSWORD
         server.ACCESS_PASSWORD = old_password
 
@@ -125,8 +142,15 @@ def test_auth_and_data_apis():
 def test_stats_apis():
     # Configure fake password
     import server
+    import server_modules.processor as processor
     old_password = server.ACCESS_PASSWORD
     server.ACCESS_PASSWORD = "testpassword"
+    
+    # Redirect DB paths to temp test database
+    old_server_db_path = server.DB_PATH
+    old_processor_db_path = processor.DB_PATH
+    server.DB_PATH = "data/test_statistics.db"
+    processor.DB_PATH = "data/test_statistics.db"
     
     # Login
     response = client.post("/api/auth/login", json={"password": "testpassword"})
@@ -153,10 +177,10 @@ def test_stats_apis():
         
     try:
         # Clear stats database to ensure a clean slate
-        db_path = "data/statistics.db"
-        if os.path.exists(db_path):
+        test_db_path = "data/test_statistics.db"
+        if os.path.exists(test_db_path):
             try:
-                os.remove(db_path)
+                os.remove(test_db_path)
             except Exception:
                 pass
 
@@ -184,20 +208,30 @@ def test_stats_apis():
     finally:
         if os.path.exists(test_file):
             os.remove(test_file)
-        db_path = "data/statistics.db"
-        if os.path.exists(db_path):
+        test_db_path = "data/test_statistics.db"
+        if os.path.exists(test_db_path):
             try:
-                os.remove(db_path)
+                os.remove(test_db_path)
             except Exception:
                 pass
+        # Restore DB paths
+        server.DB_PATH = old_server_db_path
+        processor.DB_PATH = old_processor_db_path
         server.ACCESS_PASSWORD = old_password
 
 
 def test_papers_range_api():
     # Configure fake password
     import server
+    import server_modules.processor as processor
     old_password = server.ACCESS_PASSWORD
     server.ACCESS_PASSWORD = "testpassword"
+    
+    # Redirect DB paths to temp test database
+    old_server_db_path = server.DB_PATH
+    old_processor_db_path = processor.DB_PATH
+    server.DB_PATH = "data/test_statistics.db"
+    processor.DB_PATH = "data/test_statistics.db"
     
     # Login
     response = client.post("/api/auth/login", json={"password": "testpassword"})
@@ -228,10 +262,10 @@ def test_papers_range_api():
         
     try:
         # Clear stats database to ensure a clean slate
-        db_path = "data/statistics.db"
-        if os.path.exists(db_path):
+        test_db_path = "data/test_statistics.db"
+        if os.path.exists(test_db_path):
             try:
-                os.remove(db_path)
+                os.remove(test_db_path)
             except Exception:
                 pass
 
@@ -259,33 +293,43 @@ def test_papers_range_api():
             os.remove(test_file_1)
         if os.path.exists(test_file_2):
             os.remove(test_file_2)
-        db_path = "data/statistics.db"
-        if os.path.exists(db_path):
+        test_db_path = "data/test_statistics.db"
+        if os.path.exists(test_db_path):
             try:
-                os.remove(db_path)
+                os.remove(test_db_path)
             except Exception:
                 pass
+        # Restore DB paths
+        server.DB_PATH = old_server_db_path
+        processor.DB_PATH = old_processor_db_path
         server.ACCESS_PASSWORD = old_password
 
 
 def test_hot_papers_apis():
     # Setup test password and login
     import server
+    import server_modules.processor as processor
     old_password = server.ACCESS_PASSWORD
     server.ACCESS_PASSWORD = "testpassword"
     
+    # Redirect DB paths to temp test database
+    old_server_db_path = server.DB_PATH
+    old_processor_db_path = processor.DB_PATH
+    server.DB_PATH = "data/test_statistics.db"
+    processor.DB_PATH = "data/test_statistics.db"
+    
     try:
         # Clear stats database to ensure a clean slate
-        db_path = "data/statistics.db"
-        if os.path.exists(db_path):
+        test_db_path = "data/test_statistics.db"
+        if os.path.exists(test_db_path):
             try:
-                os.remove(db_path)
+                os.remove(test_db_path)
             except Exception:
                 pass
         
         # Create database and hot_papers_cache table for test environment
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        conn = server.connect_db(db_path)
+        os.makedirs(os.path.dirname(test_db_path), exist_ok=True)
+        conn = server.connect_db(test_db_path)
         cursor = conn.cursor()
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS hot_papers_cache (
@@ -352,6 +396,14 @@ def test_hot_papers_apis():
             assert papers[0]["url"] == "https://doi.org/10.1000/xyz123"
             assert papers[0]["publication_date"] == "2026-07-01"
             mock_get.assert_called_once()
+            
+            # Verify Cache Hit: Second request must use cached result without calling requests.get again
+            response2 = client.get("/api/stats/hot-papers?journal=TGRS&period=30", headers=headers)
+            assert response2.status_code == 200
+            papers2 = response2.json()
+            assert len(papers2) == 1
+            assert papers2[0]["title"] == "Mocked Hot Paper"
+            assert mock_get.call_count == 1
         
         # 测试非法 period
         response = client.get("/api/stats/hot-papers?journal=TGRS&period=5", headers=headers)
@@ -361,12 +413,15 @@ def test_hot_papers_apis():
         response = client.get("/api/stats/hot-papers?journal=INVALID&period=30", headers=headers)
         assert response.status_code == 404
     finally:
-        db_path = "data/statistics.db"
-        if os.path.exists(db_path):
+        test_db_path = "data/test_statistics.db"
+        if os.path.exists(test_db_path):
             try:
-                os.remove(db_path)
+                os.remove(test_db_path)
             except Exception:
                 pass
+        # Restore DB paths
+        server.DB_PATH = old_server_db_path
+        processor.DB_PATH = old_processor_db_path
         server.ACCESS_PASSWORD = old_password
 
 
