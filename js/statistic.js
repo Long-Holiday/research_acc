@@ -1,4 +1,4 @@
-const escapeHtml = window.utils ? window.utils.escapeHtml : function(str) {
+var escapeHtml = window.utils ? window.utils.escapeHtml : function(str) {
   if (!str) return '';
   return str.replace(/[&<>'"]/g, 
     tag => ({
@@ -929,9 +929,6 @@ window.updateCharts = function() {
     };
     renderNetwork(netData);
   }
-  
-  // 5. Hot Papers Leaderboard
-  renderHotPapers();
 }
 
 function changeDistDimension(dimension) {
@@ -1591,7 +1588,7 @@ function renderNetwork(dataOrPapers) {
         .enter().append("circle")
         .attr("class", "network-node")
         .attr("r", d => sizeScale(d.value))
-        .attr("fill", d => color(d.group !== undefined ? d.group : d.id))
+        .attr("fill", d => color(d.id))
         .call(d3.drag()
             .on("start", dragstarted)
             .on("drag", dragged)
@@ -1668,89 +1665,4 @@ function renderNetwork(dataOrPapers) {
         d.fx = null;
         d.fy = null;
     }
-}
-
-function renderHotPapers() {
-  const hotPapersSection = document.getElementById('hotPapersSection');
-  const hotPapersList = document.getElementById('hotPapersList');
-  const hotPapersCategoryName = document.getElementById('hotPapersCategoryName');
-  
-  if (!hotPapersSection || !hotPapersList) return;
-  
-  const isAll = selectedCategories.includes('All');
-  if (hotPapersCategoryName) {
-    hotPapersCategoryName.textContent = isAll ? 'All Categories' : selectedCategories.join(', ');
-  }
-  
-  // Filter papers
-  const filtered = isAll
-    ? allPapersData
-    : allPapersData.filter(paper => paper.category && selectedCategories.includes(paper.category[0]));
-    
-  if (!filtered || filtered.length === 0) {
-    hotPapersSection.style.display = 'none';
-    return;
-  }
-  
-  // Sort by cited_by_count descending
-  const sorted = [...filtered].sort((a, b) => (b.cited_by_count || 0) - (a.cited_by_count || 0));
-  
-  // Take top 10
-  const top10 = sorted.slice(0, 10);
-  
-  hotPapersSection.style.display = 'block';
-  
-  hotPapersList.innerHTML = top10.map((paper, index) => {
-    const rank = index + 1;
-    let badgeStyle = 'background: #94a3b8; color: white;';
-    if (rank === 1) badgeStyle = 'background: linear-gradient(135deg, #f59e0b, #d97706); color: white; font-weight: bold; box-shadow: 0 2px 4px rgba(217,119,6,0.3);';
-    else if (rank === 2) badgeStyle = 'background: linear-gradient(135deg, #94a3b8, #475569); color: white; font-weight: bold; box-shadow: 0 2px 4px rgba(71,85,105,0.3);';
-    else if (rank === 3) badgeStyle = 'background: linear-gradient(135deg, #b45309, #78350f); color: white; font-weight: bold; box-shadow: 0 2px 4px rgba(120,53,15,0.3);';
-    
-    const title = escapeHtml(paper.title);
-    const transTitle = paper.translated_title ? `<div class="hot-paper-trans" style="font-size: 13px; color: var(--text-secondary); margin-top: 4px; font-weight: 500;">译文: ${escapeHtml(paper.translated_title)}</div>` : '';
-    const citedCount = paper.cited_by_count || 0;
-    
-    // Format concepts / tags
-    let conceptsHtml = '';
-    if (paper.concepts && paper.concepts.length > 0) {
-      // Handle array of strings or array of objects with display_name
-      conceptsHtml = `
-        <div class="hot-paper-concepts" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
-          ${paper.concepts.slice(0, 4).map(c => {
-            const name = typeof c === 'string' ? c : (c.display_name || c.name || '');
-            if (!name) return '';
-            return `
-              <span style="background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; padding: 2px 8px; border-radius: 12px; border: 1px solid var(--border-color); font-weight: 500;">
-                ${escapeHtml(name)}
-              </span>
-            `;
-          }).join('')}
-        </div>
-      `;
-    }
-    
-    return `
-      <div class="hot-paper-item" style="display: flex; gap: 16px; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); align-items: flex-start;">
-        <div class="hot-paper-rank" style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; ${badgeStyle} font-size: 14px; flex-shrink: 0;">
-          ${rank}
-        </div>
-        <div class="hot-paper-main" style="flex-grow: 1;">
-          <a class="hot-paper-title" href="${paper.url}" target="_blank" style="font-weight: 600; font-size: 15px; color: var(--text-color); text-decoration: none; display: inline-block;">
-            ${title}
-          </a>
-          ${transTitle}
-          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; display: flex; align-items: center; gap: 12px;">
-            <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px;">${escapeHtml(paper.authors)}</span>
-            <span>📅 ${paper.date}</span>
-          </div>
-          ${conceptsHtml}
-        </div>
-        <div class="hot-paper-citations" style="flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); padding: 6px 12px; border-radius: 6px;">
-          <span style="font-size: 16px; font-weight: bold; color: var(--primary-color);">${citedCount}</span>
-          <span style="font-size: 10px; color: var(--text-secondary); font-weight: 500;">Citations 📊</span>
-        </div>
-      </div>
-    `;
-  }).join('');
 }

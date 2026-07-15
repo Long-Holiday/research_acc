@@ -1,4 +1,4 @@
-const escapeHtml = window.utils ? window.utils.escapeHtml : function(str) {
+var escapeHtml = window.utils ? window.utils.escapeHtml : function(str) {
   if (!str) return '';
   return str.replace(/[&<>'"]/g, 
     tag => ({
