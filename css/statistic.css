@@ -1311,3 +1311,45 @@ input:checked + .toggle-slider:before {
 .global-exclude-wrapper .choices__input::placeholder {
     color: #94a3b8;
 }
+
+/* Hot Papers Leaderboard styles */
+.hot-paper-item {
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.hot-paper-item:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.08));
+    border-color: var(--primary-color, #6366f1);
+}
+
+.hot-paper-title:hover {
+    color: var(--primary-color, #6366f1) !important;
+}
+
+.growth-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+    color: white;
+    border-radius: 12px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-left: 8px;
+    box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+    animation: pulse-growth 2s infinite;
+}
+
+@keyframes pulse-growth {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    100% {
+        transform: scale(1);
+    }
+}

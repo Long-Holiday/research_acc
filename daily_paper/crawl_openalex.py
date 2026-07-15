@@ -155,6 +155,11 @@ def main():
                     abs_url = f"https://doi.org/{doi}"
                     pdf_url = abs_url
                 
+                concepts = []
+                for concept in paper_detail.get("concepts", []):
+                    if concept.get("display_name") and concept.get("score", 0) > 0.3:
+                        concepts.append(concept.get("display_name"))
+
                 item = {
                     "id": openalex_id,
                     "title": title,
@@ -163,7 +168,9 @@ def main():
                     "comment": "",
                     "summary": summary,
                     "abs": abs_url,
-                    "pdf": pdf_url
+                    "pdf": pdf_url,
+                    "cited_by_count": paper_detail.get("cited_by_count", 0),
+                    "concepts": concepts[:5]
                 }
                 
                 formatted_papers.append(item)
@@ -206,6 +213,11 @@ def main():
                 abs_url = paper.get("doi") or paper.get("primary_location", {}).get("landing_page_url") or f"https://openalex.org/{openalex_id}"
                 pdf_url = paper.get("primary_location", {}).get("pdf_url") or paper.get("open_access", {}).get("oa_url") or abs_url
                 
+                concepts = []
+                for concept in paper.get("concepts", []):
+                    if concept.get("display_name") and concept.get("score", 0) > 0.3:
+                        concepts.append(concept.get("display_name"))
+
                 item = {
                     "id": openalex_id,
                     "title": title,
@@ -214,7 +226,9 @@ def main():
                     "comment": "",
                     "summary": summary,
                     "abs": abs_url,
-                    "pdf": pdf_url
+                    "pdf": pdf_url,
+                    "cited_by_count": paper.get("cited_by_count", 0),
+                    "concepts": concepts[:5]
                 }
                 
                 formatted_papers.append(item)

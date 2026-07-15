@@ -18,7 +18,6 @@ wheels/
 .DS_Store
 .cursorrules
 .agents/
-docs/
 
 # Environment variables & secrets
 .env

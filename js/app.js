@@ -1,4 +1,4 @@
-function escapeHtml(str) {
+const escapeHtml = window.utils ? window.utils.escapeHtml : function(str) {
   if (!str) return '';
   return str.replace(/[&<>'"]/g, 
     tag => ({
@@ -9,7 +9,7 @@ function escapeHtml(str) {
       '"': '&quot;'
     }[tag] || tag)
   );
-}
+};
 
 let currentDate = '';
 let availableDates = [];
@@ -726,7 +726,9 @@ function normalizePaper(paper, date) {
     code_url: paper.code_url || '',
     code_stars: paper.code_stars || 0,
     code_last_update: paper.code_last_update || '',
-    abstract_zh: paper.abstract_zh || ''
+    abstract_zh: paper.abstract_zh || '',
+    cited_by_count: paper.cited_by_count || 0,
+    concepts: paper.concepts || []
   };
 }
 

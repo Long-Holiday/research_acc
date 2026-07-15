@@ -192,6 +192,23 @@
                             <canvas id="keywordDistributionChart"></canvas>
                         </div>
                     </div>
+                    
+                    <!-- 论文引文热度排行榜 -->
+                    <div class="statistics-section" id="hotPapersSection" style="margin-top: 30px; display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color);">
+                            <h2 style="font-size: 20px; font-weight: 600; color: var(--text-color); margin: 0; display: flex; align-items: center; gap: 8px;">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--primary-color);">
+                                    <path d="M12 17.27L18.18 21L16.54 13.97L22 9.24L14.81 8.63L12 2L9.19 8.63L2 9.24L7.46 13.97L5.82 21L12 17.27Z" fill="currentColor"/>
+                                </svg>
+                                论文引文热度排行榜 - <span id="hotPapersCategoryName">All Categories</span>
+                            </h2>
+                        </div>
+                        <div class="statistics-card" style="position: relative; width: 100%; background: var(--card-bg-color); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); padding: 20px; box-sizing: border-box;">
+                            <div id="hotPapersList" style="display: flex; flex-direction: column; gap: 12px;">
+                                <!-- 动态插入排名前10的文章 -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
@@ -218,6 +235,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/utils.js"></script>
     <script src="js/statistic.js"></script>
 </body>
 </html> 

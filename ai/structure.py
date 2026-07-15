@@ -1,6 +1,13 @@
 from pydantic import BaseModel, Field, field_validator
 import re
 
+import os
+
+CROSS_DOMAIN_PROMPT = os.environ.get(
+    "CROSS_DOMAIN_PROMPT",
+    "与遥感交叉或者改进方案。如果本身就是遥感论文，给出有哪些可以改进的地方（改进方案）；如果是其他学科的论文，给出与遥感交叉的具体方案。开头第一句必须先给出可行性百分比，格式为：交叉/改进可行性：XX%。，后面再给出具体方案。"
+)
+
 class Structure(BaseModel):
     translated_title: str = Field(description="translate the paper's title into Chinese (or the specified target language)")
     tldr: str = Field(description="generate a too long; didn't read summary")
@@ -9,7 +16,7 @@ class Structure(BaseModel):
     result: str = Field(description="result of this paper")
     conclusion: str = Field(description="conclusion of this paper")
     remote_sensing_cross: str = Field(
-        description="与遥感交叉或者改进方案。如果本身就是遥感论文，给出有哪些可以改进的地方（改进方案）；如果是其他学科的论文，给出与遥感交叉的具体方案。开头第一句必须先给出可行性百分比，格式为：交叉/改进可行性：XX%。，后面再给出具体方案。"
+        description=CROSS_DOMAIN_PROMPT
     )
 
     @field_validator("remote_sensing_cross")

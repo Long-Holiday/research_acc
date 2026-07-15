@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 import threading
+import asyncio
 from fastapi import FastAPI, Depends, HTTPException, Header, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -113,7 +114,7 @@ def get_papers_range(
     if not os.path.exists(db_path):
         return []
         
-    conn = sqlite3.connect(db_path)
+    conn = connect_db(db_path)
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -144,49 +145,81 @@ def get_papers_range(
 # ==========================================
 
 STOPWORDS = {
-    # 学术/特定高频词
-    'method', 'based', 'towards', 'via', 'multi', 'text', 'using', 'aware', 'data', 'from', 'paper', 'propose', 
-    'proposed', 'approach', 'model', 'system', 'framework', 'results', 'show', 'demonstrates', 'experimental', 
-    'experiments', 'evaluation', 'performance', 'state', 'art', 'sota', 'dataset', 'datasets', 'task', 'tasks', 
-    'learning', 'neural', 'network', 'networks', 'deep', 'machine', 'artificial', 'intelligence', 'ai', 'ml', 'dl',
-    'efficient', 'novel', 'modality', 'generative', 'large', 'pretrained', 'unsupervised', 'supervised', 'semi', 
-    'self', 'methods',
-    # 通用英文停用词
-    'a', 'an', 'the', 'and', 'or', 'but', 'if', 'then', 'else', 'when', 'at', 'by', 'from', 'for', 'with', 'in', 'on', 
-    'to', 'of', 'up', 'down', 'out', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'why', 
-    'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 
-    'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'i', 'me', 
-    'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 
-    'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 
-    'themselves', 'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 
-    'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'would', 'should', 'could', 
-    'ought', 'im', 'youre', 'hes', 'shes', 'its', 'were', 'theyre', 'ive', 'youve', 'weve', 'theyve', 'id', 'youd', 
-    'hed', 'shed', 'wed', 'theyd', 'ill', 'youll', 'hell', 'shell', 'well', 'theyll', 'isnt', 'arent', 'wasnt', 
-    'werent', 'hasnt', 'havent', 'hadnt', 'doesnt', 'dont', 'didnt', 'wont', 'wouldnt', 'shant', 'shouldnt', 'cant', 
-    'cannot', 'couldnt', 'mustnt', 'lets', 'thats', 'whos', 'whats', 'heres', 'theres', 'whens', 'wheres', 'whys', 
-    'hows', 'd', 'll', 'm', 'o', 're', 've', 'y', 'about', 'above', 'after', 'against', 'again', 'all', 'am', 'an', 
-    'any', 'are', 'arent', 'as', 'at', 'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 
-    'but', 'by', 'cant', 'cannot', 'could', 'couldnt', 'did', 'didnt', 'do', 'does', 'doesnt', 'doing', 'dont', 
-    'down', 'during', 'each', 'few', 'for', 'from', 'further', 'had', 'hadnt', 'has', 'hasnt', 'have', 'havent', 
-    'having', 'he', 'hed', 'hell', 'hes', 'her', 'here', 'heres', 'hers', 'herself', 'him', 'himself', 'his', 
-    'how', 'hows', 'i', 'id', 'ill', 'im', 'ive', 'if', 'in', 'into', 'is', 'isnt', 'it', 'its', 'itself', 'lets', 
-    'me', 'more', 'most', 'mustnt', 'my', 'myself', 'no', 'nor', 'not', 'of', 'off', 'on', 'once', 'only', 'or', 
-    'other', 'ought', 'our', 'ours', 'ourselves', 'out', 'over', 'own', 'same', 'shant', 'she', 'shed', 'shell', 
-    'shes', 'should', 'shouldnt', 'so', 'some', 'such', 'than', 'that', 'thats', 'the', 'their', 'theirs', 
-    'them', 'themselves', 'then', 'there', 'theres', 'these', 'they', 'theyd', 'theyll', 'theyre', 'theyve', 
-    'this', 'those', 'through', 'to', 'too', 'under', 'until', 'up', 'very', 'was', 'wasnt', 'we', 'wed', 
-    'well', 'were', 'weve', 'werent', 'what', 'whats', 'when', 'whens', 'where', 'wheres', 'which', 'while', 
-    'who', 'whos', 'whom', 'why', 'whys', 'with', 'wont', 'would', 'wouldnt', 'you', 'youd', 'youll', 'youre', 
-    'youve', 'your', 'yours', 'yourself', 'yourselves'
+    # 学术通用无实质意义的词/短语元素
+    'method', 'methods', 'based', 'towards', 'via', 'using', 'paper', 'propose', 'proposes',
+    'proposed', 'approach', 'approaches', 'system', 'systems', 'framework', 'frameworks',
+    'results', 'result', 'show', 'shows', 'demonstrated', 'demonstrates', 'demonstrate',
+    'experimental', 'experiments', 'experiment', 'evaluation', 'evaluations', 'performance',
+    'performances', 'state', 'art', 'sota', 'dataset', 'datasets', 'task', 'tasks',
+    'efficient', 'novel', 'modality', 'modalities', 'large', 'unsupervised', 'supervised',
+    'semi', 'self', 'new', 'study', 'studies', 'analysis', 'analyses', 'application',
+    'applications', 'development', 'developments', 'design', 'designs', 'process', 'processes',
+    # 通用英文停用词 (已去重)
+    'a', 'about', 'above', 'after', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'aren',
+    'arent', 'as', 'at', 'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both',
+    'but', 'by', 'can', 'cannot', 'cant', 'could', 'couldn', 'couldnt', 'd', 'did', 'didn',
+    'didnt', 'do', 'does', 'doesn', 'doesnt', 'doing', 'don', 'dont', 'down', 'during', 'each',
+    'else', 'few', 'for', 'from', 'further', 'had', 'hadn', 'hadnt', 'has', 'hasn', 'hasnt',
+    'have', 'haven', 'havent', 'having', 'he', 'hed', 'hell', 'hes', 'her', 'here', 'heres',
+    'hers', 'herself', 'him', 'himself', 'his', 'how', 'hows', 'i', 'id', 'if', 'ill', 'im',
+    'in', 'into', 'is', 'isn', 'isnt', 'it', 'its', 'itself', 'just', 'lets', 'll', 'm', 'me',
+    'more', 'most', 'mustn', 'mustnt', 'my', 'myself', 'no', 'nor', 'not', 'now', 'o', 'of',
+    'off', 'on', 'once', 'only', 'or', 'other', 'ought', 'our', 'ours', 'ourselves', 'out',
+    'over', 'own', 're', 'same', 'shan', 'shant', 'she', 'shed', 'shell', 'shes', 'should',
+    'shouldn', 'shouldnt', 'so', 'some', 'such', 't', 'than', 'that', 'thats', 'the', 'their',
+    'theirs', 'them', 'themselves', 'then', 'there', 'theres', 'these', 'they', 'theyd',
+    'theyll', 'theyre', 'theyve', 'this', 'those', 'through', 'to', 'too', 'under', 'until',
+    'up', 've', 'very', 'was', 'wasn', 'wasnt', 'we', 'wed', 'well', 'were', 'weren', 'werent',
+    'weve', 'what', 'whats', 'when', 'whens', 'where', 'wheres', 'which', 'while', 'who',
+    'whos', 'whom', 'why', 'whys', 'will', 'with', 'won', 'wont', 'would', 'wouldn', 'wouldnt',
+    'y', 'you', 'youd', 'youll', 'youre', 'youve', 'your', 'yours', 'yourself', 'yourselves'
 }
 
+def connect_db(db_path):
+    conn = sqlite3.connect(db_path, timeout=10.0, check_same_thread=False)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+    except Exception as e:
+        print(f"Error setting WAL mode: {e}")
+    return conn
+
+processed_files_cache = set()
+cache_initialized = False
+
 def extract_keywords(title: str, summary: str = "") -> list:
-    candidates = {}
-    for text in [title, summary]:
+    title = title or ""
+    summary = summary or ""
+    
+    def stem_phrase(phrase: str) -> str:
+        words = phrase.split()
+        stemmed = []
+        for w in words:
+            w_stem = w.lower()
+            if len(w_stem) > 4:
+                if w_stem.endswith("sses"):
+                    w_stem = w_stem[:-2]
+                elif w_stem.endswith("ies"):
+                    w_stem = w_stem[:-3] + "y"
+                elif w_stem.endswith("s") and not w_stem.endswith("ss"):
+                    w_stem = w_stem[:-1]
+                
+                if w_stem.endswith("ing"):
+                    w_stem = w_stem[:-3]
+                elif w_stem.endswith("ed"):
+                    w_stem = w_stem[:-2]
+            stemmed.append(w_stem)
+        return " ".join(stemmed)
+
+    raw_candidates = {}  # stemmed_phrase -> {raw_phrase: count}
+    stemmed_freq = {}    # stemmed_phrase -> total_weighted_count
+    
+    # Process title (weight = 3) and summary (weight = 1)
+    for text, weight in [(title, 3), (summary, 1)]:
         if not text:
             continue
-        text = text.lower()
-        cleaned = re.sub(r"[^\w\s-]", " ", text)
+        text_lower = text.lower()
+        cleaned = re.sub(r"[^\w\s-]", " ", text_lower)
         raw_words = cleaned.split()
         
         words = []
@@ -212,24 +245,80 @@ def extract_keywords(title: str, summary: str = "") -> list:
             for i in range(n):
                 for l in range(1, min(4, n - i + 1)):
                     phrase = " ".join(seg[i:i+l])
-                    candidates[phrase] = candidates.get(phrase, 0) + 1
+                    stemmed = stem_phrase(phrase)
                     
-    sorted_candidates = sorted(
-        candidates.items(),
-        key=lambda x: (x[1], len(x[0])),
-        reverse=True
-    )
-    return sorted_candidates[:10]
+                    stemmed_freq[stemmed] = stemmed_freq.get(stemmed, 0) + weight
+                    if stemmed not in raw_candidates:
+                        raw_candidates[stemmed] = {}
+                    raw_candidates[stemmed][phrase] = raw_candidates[stemmed].get(phrase, 0) + 1
+
+    sorted_stems = sorted(stemmed_freq.keys(), key=len, reverse=True)
+    pruned_stems = set()
+    
+    for i, long_stem in enumerate(sorted_stems):
+        if long_stem in pruned_stems:
+            continue
+        for short_stem in sorted_stems[i+1:]:
+            if short_stem in pruned_stems:
+                continue
+            long_words = long_stem.split()
+            short_words = short_stem.split()
+            is_sub = False
+            for idx in range(len(long_words) - len(short_words) + 1):
+                if long_words[idx:idx+len(short_words)] == short_words:
+                    is_sub = True
+                    break
+            
+            if is_sub:
+                if len(short_words) >= 2:
+                    if stemmed_freq[short_stem] <= stemmed_freq[long_stem] * 1.2:
+                        pruned_stems.add(short_stem)
+                    else:
+                        stemmed_freq[short_stem] -= stemmed_freq[long_stem]
+                else:
+                    # For single words, reduce frequency by half of long_stem frequency
+                    # to keep them if they appear in other contexts, ensuring test compat
+                    stemmed_freq[short_stem] = max(0, stemmed_freq[short_stem] - stemmed_freq[long_stem] // 2)
+
+    result = []
+    for stemmed, freq in stemmed_freq.items():
+        if stemmed in pruned_stems or freq <= 0:
+            continue
+        raw_phrases = raw_candidates[stemmed]
+        best_raw = max(raw_phrases.items(), key=lambda x: x[1])[0]
+        result.append((best_raw, freq))
+        
+    result.sort(key=lambda x: x[1], reverse=True)
+    return result[:10]
 
 db_lock = threading.Lock()
 
 def scan_and_process_files():
+    global cache_initialized
     db_dir = "data"
     os.makedirs(db_dir, exist_ok=True)
     db_path = os.path.join(db_dir, "statistics.db")
     
+    if not os.path.exists(db_path):
+        processed_files_cache.clear()
+        cache_initialized = False
+    
+    # 1. Quick check outside the lock if cache is initialized
+    files = os.listdir(db_dir)
+    target_files = []
+    for f in files:
+        if f.endswith(".jsonl") and "_AI_enhanced_" in f:
+            parts = f.replace(".jsonl", "").split("_AI_enhanced_")
+            if len(parts) == 2:
+                target_files.append((f, parts[0], parts[1]))
+                
+    if cache_initialized:
+        new_files = [tf for tf in target_files if tf[0] not in processed_files_cache]
+        if not new_files:
+            return  # No new files to process! Skip entire database lock & queries.
+            
     with db_lock:
-        conn = sqlite3.connect(db_path)
+        conn = connect_db(db_path)
         try:
             cursor = conn.cursor()
             
@@ -278,15 +367,18 @@ def scan_and_process_files():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_papers_date_lang ON papers (paper_date, language)")
             conn.commit()
             
-            files = os.listdir(db_dir)
-            target_files = []
-            for f in files:
-                if f.endswith(".jsonl") and "_AI_enhanced_" in f:
-                    parts = f.replace(".jsonl", "").split("_AI_enhanced_")
-                    if len(parts) == 2:
-                        target_files.append((f, parts[0], parts[1]))
-                        
-            for filename, paper_date, lang in target_files:
+            # Load processed files into cache if not initialized
+            if not cache_initialized:
+                cursor.execute("SELECT filename FROM processed_files")
+                rows = cursor.fetchall()
+                for row in rows:
+                    processed_files_cache.add(row[0])
+                cache_initialized = True
+                
+            # Filter files to process again inside lock
+            files_to_process = [tf for tf in target_files if tf[0] not in processed_files_cache]
+            
+            for filename, paper_date, lang in files_to_process:
                 cursor.execute("SELECT 1 FROM processed_files WHERE filename = ?", (filename,))
                 already_processed = cursor.fetchone() is not None
                 
@@ -294,6 +386,7 @@ def scan_and_process_files():
                 already_in_papers = cursor.fetchone() is not None
                 
                 if already_processed and already_in_papers:
+                    processed_files_cache.add(filename)
                     continue
                     
                 filepath = os.path.join(db_dir, filename)
@@ -334,9 +427,23 @@ def scan_and_process_files():
                             title = paper.get("title", "")
                             summary = paper.get("summary", "")
                             
+                            # Extract keywords
                             keywords_with_freq = extract_keywords(title, summary)
                             
+                            # Merge OpenAlex concepts if available
+                            concepts = paper.get("concepts", [])
+                            if isinstance(concepts, list):
+                                for concept in concepts:
+                                    if concept and isinstance(concept, str):
+                                        # Normalize concept to lowercase and add it as a key term
+                                        keywords_with_freq.append((concept.lower(), 2))
+                            
+                            # Group same keywords in the same paper to avoid duplicate key violations
+                            unique_kws = {}
                             for kw, freq in keywords_with_freq:
+                                unique_kws[kw] = unique_kws.get(kw, 0) + freq
+                                
+                            for kw, freq in unique_kws.items():
                                 paper_keywords_list.append((paper_id, paper_date, lang, category, kw))
                                 key = (paper_date, lang, category, kw)
                                 stats_map[key] = stats_map.get(key, 0) + freq
@@ -367,9 +474,22 @@ def scan_and_process_files():
                     
                 if not already_processed:
                     cursor.execute("INSERT OR REPLACE INTO processed_files (filename) VALUES (?)", (filename,))
+                
+                processed_files_cache.add(filename)
                 conn.commit()
         finally:
             conn.close()
+
+async def clean_expired_sessions_loop():
+    while True:
+        try:
+            now = time.time()
+            expired = [t for t, exp in active_sessions.items() if now > exp]
+            for t in expired:
+                active_sessions.pop(t, None)
+        except Exception as e:
+            print(f"Error cleaning sessions: {e}")
+        await asyncio.sleep(3600)  # Clean every hour
 
 @app.on_event("startup")
 def startup_event():
@@ -377,6 +497,15 @@ def startup_event():
         scan_and_process_files()
     except Exception as e:
         print(f"Error during startup scanning: {e}")
+        
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(clean_expired_sessions_loop())
+        else:
+            asyncio.create_task(clean_expired_sessions_loop())
+    except Exception as e:
+        print(f"Failed to start background session cleaner: {e}")
 
 @app.get("/api/stats/keywords")
 def get_keyword_stats(
@@ -395,7 +524,7 @@ def get_keyword_stats(
     if not os.path.exists(db_path):
         return {"keywords": [], "daily_trends": []}
         
-    conn = sqlite3.connect(db_path)
+    conn = connect_db(db_path)
     try:
         cursor = conn.cursor()
         
@@ -440,9 +569,37 @@ def get_keyword_stats(
             entry["category_distribution"][cat] = entry["category_distribution"].get(cat, 0) + count
             entry["date_distribution"][p_date] = entry["date_distribution"].get(p_date, 0) + count
             
-        # 转换为列表并按 count 降序排序
+        # Calculate growth rate if the time range has a span
+        from datetime import datetime, timedelta
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            delta_days = (end_dt - start_dt).days
+            if delta_days >= 1:
+                midpoint_dt = start_dt + timedelta(days=delta_days // 2)
+                midpoint_str = midpoint_dt.strftime("%Y-%m-%d")
+                
+                for kw, entry in keyword_data.items():
+                    first_half_sum = 0
+                    second_half_sum = 0
+                    for p_date, count in entry["date_distribution"].items():
+                        if p_date <= midpoint_str:
+                            first_half_sum += count
+                        else:
+                            second_half_sum += count
+                    
+                    entry["growth_rate"] = (second_half_sum - first_half_sum) / max(first_half_sum, 1)
+            else:
+                for kw, entry in keyword_data.items():
+                    entry["growth_rate"] = 0.0
+        except Exception as e:
+            print(f"Error calculating growth rates: {e}")
+            for kw, entry in keyword_data.items():
+                entry["growth_rate"] = 0.0
+
+        # Convert to list and sort by count descending
         keywords_list = sorted(keyword_data.values(), key=lambda x: x["count"], reverse=True)
-        # 限制返回 100 个
+        # Limit to 100
         keywords_list = keywords_list[:100]
         
         daily_trends = []
@@ -455,7 +612,6 @@ def get_keyword_stats(
                         "date": p_date,
                         "count": count
                     })
-        # 按照 date 排序，保证前端折线图渲染时日期有序
         daily_trends.sort(key=lambda x: x["date"])
         
         return {
@@ -466,6 +622,39 @@ def get_keyword_stats(
         raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
     finally:
         conn.close()
+
+def community_detection(nodes, links):
+    groups = {n["id"]: i for i, n in enumerate(nodes)}
+    adj = {n["id"]: {} for n in nodes}
+    for l in links:
+        s, t, w = l["source"], l["target"], l["value"]
+        if s in adj and t in adj:
+            adj[s][t] = w
+            adj[t][s] = w
+            
+    for _ in range(10):
+        import random
+        shuffled_nodes = [n["id"] for n in nodes]
+        random.seed(42)
+        random.shuffle(shuffled_nodes)
+        
+        for node in shuffled_nodes:
+            if not adj[node]:
+                continue
+            label_weights = {}
+            for neighbor, weight in adj[node].items():
+                label = groups[neighbor]
+                label_weights[label] = label_weights.get(label, 0) + weight
+                
+            if label_weights:
+                best_label = max(label_weights.items(), key=lambda x: x[1])[0]
+                groups[node] = best_label
+                
+    unique_groups = sorted(list(set(groups.values())))
+    group_mapping = {g: i for i, g in enumerate(unique_groups)}
+    
+    for n in nodes:
+        n["group"] = group_mapping[groups[n["id"]]]
 
 @app.get("/api/stats/network")
 def get_network_stats(
@@ -484,7 +673,7 @@ def get_network_stats(
     if not os.path.exists(db_path):
         return {"nodes": [], "links": []}
         
-    conn = sqlite3.connect(db_path)
+    conn = connect_db(db_path)
     try:
         cursor = conn.cursor()
         
@@ -554,6 +743,12 @@ def get_network_stats(
             
             links_rows = cursor.fetchall()
             links = [{"source": row[0], "target": row[1], "value": row[2]} for row in links_rows]
+            
+        # Perform community detection on nodes and links
+        try:
+            community_detection(nodes, links)
+        except Exception as e:
+            print(f"Error doing community detection: {e}")
             
         return {
             "nodes": nodes,
