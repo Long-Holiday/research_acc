@@ -975,7 +975,7 @@ window.updateCharts = function() {
         <div class="keyword-item" onclick="showRelatedPapers('${escapeHtml(item.keyword)}')">
           <span class="keyword-rank">${index + 1}</span>
           <span class="keyword-text">${escapeHtml(item.keyword)}</span>
-          <span class="keyword-count">${item.count}</span>
+          <span class="keyword-count">${Math.round(item.count)}</span>
           ${growthBadge}
         </div>
       `;
