@@ -138,6 +138,12 @@ def main():
                         
                     abs_url = paper_detail.get("doi") or paper_detail.get("primary_location", {}).get("landing_page_url") or f"https://openalex.org/{openalex_id}"
                     pdf_url = paper_detail.get("primary_location", {}).get("pdf_url") or paper_detail.get("open_access", {}).get("oa_url") or abs_url
+                    
+                    concepts = []
+                    for concept in paper_detail.get("concepts", []):
+                        if concept.get("display_name") and concept.get("score", 0) > 0.3:
+                            concepts.append(concept.get("display_name"))
+                    cited_by_count = paper_detail.get("cited_by_count", 0)
                 else:
                     # 彻底查不到 OpenAlex 详情：使用 Crossref 元数据兜底补漏
                     print(f"WARNING: DOI {doi} not found in OpenAlex. Using Crossref metadata fallback.", file=sys.stderr)
@@ -154,12 +160,9 @@ def main():
                         
                     abs_url = f"https://doi.org/{doi}"
                     pdf_url = abs_url
+                    concepts = []
+                    cited_by_count = 0
                 
-                concepts = []
-                for concept in paper_detail.get("concepts", []):
-                    if concept.get("display_name") and concept.get("score", 0) > 0.3:
-                        concepts.append(concept.get("display_name"))
-
                 item = {
                     "id": openalex_id,
                     "title": title,
@@ -169,7 +172,7 @@ def main():
                     "summary": summary,
                     "abs": abs_url,
                     "pdf": pdf_url,
-                    "cited_by_count": paper_detail.get("cited_by_count", 0),
+                    "cited_by_count": cited_by_count,
                     "concepts": concepts[:5]
                 }
                 
