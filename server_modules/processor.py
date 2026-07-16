@@ -92,23 +92,21 @@ def scan_and_process_files():
                     processed_files_cache.add(row[0])
                 cache_initialized = True
                 
-            # Rebuild/refresh global IDF cache from existing papers
+            # Rebuild/refresh global IDF cache from existing papers using DB aggregate queries
             try:
-                cursor.execute("SELECT paper_json FROM papers")
-                p_rows = cursor.fetchall()
-                keywords.idf_doc_count = len(p_rows)
-                df = {}
-                for p_row in p_rows:
-                    try:
-                        p_data = json.loads(p_row[0])
-                        p_text = (p_data.get("title", "") + " " + p_data.get("summary", "")).lower()
-                        # Simple alphanumeric words of length > 2
-                        p_words = set(re.findall(r"\b[a-z]{3,}\b", p_text))
-                        for w in p_words:
-                            df[w] = df.get(w, 0) + 1
-                    except Exception:
-                        continue
-                keywords.idf_cache = {w: math.log((1 + keywords.idf_doc_count) / (1 + count)) + 1 for w, count in df.items()}
+                cursor.execute("SELECT COUNT(*) FROM papers")
+                total_papers = cursor.fetchone()[0]
+                keywords.idf_doc_count = total_papers
+                
+                if total_papers > 0:
+                    cursor.execute("SELECT keyword, COUNT(DISTINCT paper_id) FROM paper_keywords GROUP BY keyword")
+                    df_rows = cursor.fetchall()
+                    keywords.idf_cache = {
+                        row[0].lower(): math.log((1 + total_papers) / (1 + row[1])) + 1
+                        for row in df_rows if row[0]
+                    }
+                else:
+                    keywords.idf_cache = {}
             except Exception as idf_err:
                 print(f"Error initializing IDF cache: {idf_err}")
                 keywords.idf_cache = {}

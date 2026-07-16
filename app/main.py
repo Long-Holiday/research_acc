@@ -1,8 +1,10 @@
 import os
 import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.gzip import GZipMiddleware
 
 import app.config as config
 from server_modules.database import connect_db
@@ -11,17 +13,20 @@ from app.auth import router as auth_router, clean_expired_sessions_loop
 from server_modules.papers import router as papers_router
 from server_modules.stats import router as stats_router
 
-app = FastAPI(title="Daily arXiv AI Enhanced Server")
+async def periodic_file_scan():
+    while True:
+        try:
+            # 5分钟扫描一次新文件，在独立线程运行以免阻塞事件循环
+            await asyncio.to_thread(scan_and_process_files)
+        except Exception as e:
+            print(f"Error during background periodic scanning: {e}")
+        await asyncio.sleep(300)
 
-# Include routers
-app.include_router(auth_router)
-app.include_router(papers_router)
-app.include_router(stats_router)
-
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时执行一次同步扫描
     try:
-        scan_and_process_files()
+        await asyncio.to_thread(scan_and_process_files)
     except Exception as e:
         print(f"Error during startup scanning: {e}")
         
@@ -43,14 +48,23 @@ def startup_event():
     except Exception as e:
         print(f"Error creating hot_papers_cache table on startup: {e}")
         
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(clean_expired_sessions_loop())
-        else:
-            asyncio.create_task(clean_expired_sessions_loop())
-    except Exception as e:
-        print(f"Failed to start background session cleaner: {e}")
+    # 启动后台定时任务
+    session_task = asyncio.create_task(clean_expired_sessions_loop())
+    scan_task = asyncio.create_task(periodic_file_scan())
+    
+    yield
+    
+    # 停止后台任务
+    session_task.cancel()
+    scan_task.cancel()
+
+app = FastAPI(title="Daily arXiv AI Enhanced Server", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Include routers
+app.include_router(auth_router)
+app.include_router(papers_router)
+app.include_router(stats_router)
 
 # Serve HTML pages directly
 @app.get("/")

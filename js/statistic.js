@@ -964,14 +964,13 @@ window.updateCharts = function() {
     hotKeywordsList.innerHTML = displayedKeywords.map((item, index) => {
       const isTop5 = top5Keywords.has(item.keyword);
       const isGreaterThanPointTwo = item.growth_rate && item.growth_rate > 0.2;
-      const showBadge = isTop5 || isGreaterThanPointTwo;
+      const showFire = isTop5 || isGreaterThanPointTwo;
       
-      let growthBadge = '';
-      if (showBadge) {
-        const rateVal = Math.round((item.growth_rate || 0) * 100);
-        const rateText = rateVal >= 0 ? `+${rateVal}%` : `${rateVal}%`;
-        growthBadge = `<span class="growth-badge">${rateText} 🔥</span>`;
-      }
+      const rateVal = Math.round((item.growth_rate || 0) * 100);
+      const rateText = rateVal >= 0 ? `+${rateVal}%` : `${rateVal}%`;
+      const badgeClass = showFire ? 'growth-badge' : 'growth-badge-neutral';
+      const fireIcon = showFire ? ' 🔥' : '';
+      const growthBadge = `<span class="${badgeClass}">${rateText}${fireIcon}</span>`;
       return `
         <div class="keyword-item" onclick="showRelatedPapers('${escapeHtml(item.keyword)}')">
           <span class="keyword-rank">${index + 1}</span>

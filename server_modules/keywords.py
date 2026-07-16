@@ -32,17 +32,27 @@ STOPWORDS = {
     'y', 'you', 'youd', 'youll', 'youre', 'youve', 'your', 'yours', 'yourself', 'yourselves'
 }
 
-try:
-    nlp = spacy.load("en_core_web_sm")
-except Exception as e:
-    print(f"Failed to load spaCy model 'en_core_web_sm': {e}")
-    nlp = None
+nlp = None
+nlp_loaded = False
+
+def get_nlp():
+    global nlp, nlp_loaded
+    if not nlp_loaded:
+        try:
+            import spacy
+            nlp = spacy.load("en_core_web_sm")
+        except Exception as e:
+            print(f"Failed to load spaCy model 'en_core_web_sm': {e}")
+            nlp = None
+        nlp_loaded = True
+    return nlp
 
 idf_cache = {}
 idf_doc_count = 0
 
 def extract_candidates_spacy(title: str, summary: str = ""):
-    if not nlp:
+    active_nlp = get_nlp()
+    if not active_nlp:
         return {}, {}
     
     candidates = {}
@@ -55,7 +65,7 @@ def extract_candidates_spacy(title: str, summary: str = ""):
         text_lower = text.lower()
         
         try:
-            doc = nlp(text_lower)
+            doc = active_nlp(text_lower)
             
             # 1. Extract noun chunks (phrases)
             for chunk in doc.noun_chunks:
@@ -78,12 +88,12 @@ def extract_candidates_spacy(title: str, summary: str = ""):
             # 2. Extract individual nouns, adjectives, and proper nouns
             for t in doc:
                 if t.pos_ in ["NOUN", "PROPN", "ADJ"] and not t.is_stop and t.text not in STOPWORDS and len(t.lemma_) > 1:
-                    word = t.lemma_
-                    raw_word = t.text
-                    candidates[word] = candidates.get(word, 0) + weight
-                    if word not in raw_candidates:
-                        raw_candidates[word] = {}
-                    raw_candidates[word][raw_word] = raw_candidates[word].get(raw_word, 0) + 1
+                     word = t.lemma_
+                     raw_word = t.text
+                     candidates[word] = candidates.get(word, 0) + weight
+                     if word not in raw_candidates:
+                         raw_candidates[word] = {}
+                     raw_candidates[word][raw_word] = raw_candidates[word].get(raw_word, 0) + 1
         except Exception as e:
             print(f"Error in spaCy candidate extraction: {e}")
             
@@ -98,7 +108,8 @@ def extract_keywords(title: str, summary: str = "", idf_map: dict = None) -> lis
     default_idf = math.log((1 + idf_doc_count) / 2) + 1 if idf_doc_count > 0 else 1.0
     
     # 1. Try spaCy NLP approach
-    if nlp is not None:
+    active_nlp = get_nlp()
+    if active_nlp is not None:
         try:
             candidates, raw_candidates = extract_candidates_spacy(title, summary)
             if candidates:
