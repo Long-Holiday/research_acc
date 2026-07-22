@@ -893,20 +893,20 @@ window.updateTrendChart = function() {
     dailyGroupMap.get(item.date).push(item);
   });
 
-  // 3. 计算每天的 Top 10 关键词（根据当前 selected currentTrendYType 指标排序）并取并集
-  const dailyTop10KeywordsSet = new Set();
+  // 3. 计算每天的 Top 5 关键词（根据当前 selected currentTrendYType 指标排序）并取并集
+  const dailyTop5KeywordsSet = new Set();
   dailyGroupMap.forEach((itemsOnDate) => {
     const sortedItems = [...itemsOnDate].sort((a, b) => {
       const valA = currentTrendYType === 'count' ? (a.count || 0) : (a.rate || 0);
       const valB = currentTrendYType === 'count' ? (b.count || 0) : (b.rate || 0);
       return valB - valA;
     });
-    sortedItems.slice(0, 10).forEach(item => {
-      dailyTop10KeywordsSet.add(item.keyword);
+    sortedItems.slice(0, 5).forEach(item => {
+      dailyTop5KeywordsSet.add(item.keyword);
     });
   });
 
-  if (dailyTop10KeywordsSet.size === 0) {
+  if (dailyTop5KeywordsSet.size === 0) {
       trendChartCard.innerHTML = '<div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);"><p>暂无趋势图 / No trend data after filtering.</p></div>';
       return;
   }
@@ -915,7 +915,7 @@ window.updateTrendChart = function() {
   const kwOverallMap = new Map();
   currentKeywordsData.forEach(kw => kwOverallMap.set(kw.keyword, kw));
 
-  const sortedTopKeywords = Array.from(dailyTop10KeywordsSet).sort((a, b) => {
+  const sortedTopKeywords = Array.from(dailyTop5KeywordsSet).sort((a, b) => {
     const kwA = kwOverallMap.get(a);
     const kwB = kwOverallMap.get(b);
     if (currentTrendYType === 'count') {
@@ -1321,14 +1321,23 @@ function drawTrendChart(trendData, validDatesInRange) {
     };
   });
 
-  const itemsPerCol = 12;
-  const legendCols = Math.max(1, Math.ceil(smoothedTrendData.length / itemsPerCol));
-  const legendColWidth = 135;
-  const rightMargin = Math.max(180, legendCols * legendColWidth + 15);
+  const legendItemWidth = 135;
+  const rawWidth = chartElement.offsetWidth || 600;
+  const leftMargin = 60;
+  const rightMargin = 35;
+  const plotWidth = Math.max(100, rawWidth - leftMargin - rightMargin);
 
-  const margin = {top: 20, right: rightMargin, bottom: 80, left: 60};
-  const width = Math.max(100, chartElement.offsetWidth - margin.left - margin.right);
-  const height = 400 - margin.top - margin.bottom;
+  const itemsPerRow = Math.max(1, Math.floor(plotWidth / legendItemWidth));
+  const legendRows = Math.ceil(smoothedTrendData.length / itemsPerRow);
+  const legendHeight = legendRows * 24;
+
+  const topMargin = 20;
+  const bottomMargin = 45 + legendHeight + 15;
+  
+  const margin = {top: topMargin, right: rightMargin, bottom: bottomMargin, left: leftMargin};
+  const width = plotWidth;
+  const totalSvgHeight = 450;
+  const height = Math.max(150, totalSvgHeight - margin.top - margin.bottom);
 
   // 清除旧的 SVG
   chartElement.innerHTML = '';
@@ -1336,7 +1345,7 @@ function drawTrendChart(trendData, validDatesInRange) {
   const svg = d3.select('#trendChart')
     .append('svg')
       .attr('width', width + margin.left + margin.right)
-      .attr('height', height + margin.top + margin.bottom)
+      .attr('height', totalSvgHeight)
     .append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`);
 
@@ -1462,7 +1471,7 @@ function drawTrendChart(trendData, validDatesInRange) {
   
   if (xAxisTitle) {
     svg.append("text")
-      .attr("transform", `translate(${width/2}, ${height + margin.bottom - 5})`)
+      .attr("transform", `translate(${width/2}, ${height + 36})`)
       .style("text-anchor", "middle")
       .style("fill", "#666")
       .style("font-size", "12px")
@@ -1586,34 +1595,41 @@ function drawTrendChart(trendData, validDatesInRange) {
         });
   });
 
-  // 添加图例
+  // 添加底部图例
   const legend = svg.selectAll('.legend')
     .data(smoothedTrendData)
     .enter()
     .append('g')
       .attr('class', 'legend')
       .attr('transform', (d, i) => {
-        const col = Math.floor(i / itemsPerCol);
-        const row = i % itemsPerCol;
-        return `translate(${width + 20 + col * legendColWidth},${row * 22})`;
+        const row = Math.floor(i / itemsPerRow);
+        const col = i % itemsPerRow;
+        const countInRow = Math.min(itemsPerRow, smoothedTrendData.length - row * itemsPerRow);
+        const rowWidth = countInRow * legendItemWidth;
+        const startX = (width - rowWidth) / 2;
+        
+        const xOffset = startX + col * legendItemWidth;
+        const yOffset = height + 50 + row * 24;
+        return `translate(${xOffset},${yOffset})`;
       });
 
   legend.append('rect')
     .attr('x', 0)
-    .attr('width', 16)
-    .attr('height', 16)
+    .attr('y', 0)
+    .attr('width', 14)
+    .attr('height', 14)
     .attr('rx', 3)
     .style('fill', d => color(d.keyword))
-    .style('opacity', 0.8);
+    .style('opacity', 0.85);
 
   legend.append('text')
-    .attr('x', 24)
-    .attr('y', 11)
+    .attr('x', 20)
+    .attr('y', 8)
     .text(d => d.keyword)
     .style('font-size', '12px')
     .style('font-weight', '500')
     .style('alignment-baseline', 'middle')
-    .style('fill', '#333');
+    .style('fill', 'var(--text-color, #333)');
 
   // 添加交互效果
   legend.style('cursor', 'pointer')
