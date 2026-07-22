@@ -187,22 +187,40 @@
                                     </svg>
                                     关键词变化趋势 - <span id="trendCategoryName">All Categories</span>
                                 </h2>
-                                <div class="trend-controls-right" style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-                                    <!-- 平滑度滑钮 -->
-                                    <div class="trend-smooth-container" style="display: flex; align-items: center; gap: 8px; background: var(--bg-secondary, #f1f5f9); padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0); height: 34px; box-sizing: border-box;">
-                                        <span style="font-size: 13px; font-weight: 500; color: var(--text-secondary, #64748b);">趋势平滑 (EMA):</span>
-                                        <input type="range" id="trendSmoothSlider" min="0" max="0.9" stroke-width="2" step="0.05" value="0" style="width: 80px; height: 4px; cursor: pointer; accent-color: var(--primary-color);">
-                                        <span id="trendSmoothValue" style="font-size: 13px; font-weight: 600; color: var(--text-color, #1e293b); min-width: 28px; text-align: right;">0.00</span>
+                                <div class="trend-controls-right" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                    <!-- Top N 数量选择 -->
+                                    <div class="trend-topn-container" style="display: flex; align-items: center; background: var(--bg-secondary, #f1f5f9); padding: 3px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0);">
+                                        <span style="font-size: 12px; font-weight: 500; color: var(--text-secondary, #64748b); padding: 0 6px;">显示:</span>
+                                        <button id="btnTrendTop5" class="trend-topn-btn" onclick="changeTrendTopN(5)" style="padding: 4px 8px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; background: transparent; color: var(--text-secondary, #64748b);">Top 5</button>
+                                        <button id="btnTrendTop8" class="trend-topn-btn active" onclick="changeTrendTopN(8)" style="padding: 4px 8px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; background: var(--card-bg-color, #ffffff); color: var(--text-color, #1e293b); box-shadow: 0 1px 3px rgba(0,0,0,0.1);">Top 8</button>
+                                        <button id="btnTrendTop15" class="trend-topn-btn" onclick="changeTrendTopN(15)" style="padding: 4px 8px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; background: transparent; color: var(--text-secondary, #64748b);">Top 15</button>
+                                        <button id="btnTrendTopAll" class="trend-topn-btn" onclick="changeTrendTopN('all')" style="padding: 4px 8px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; background: transparent; color: var(--text-secondary, #64748b);">全部</button>
                                     </div>
+                                    
+                                    <!-- 图表模式 (折线图 / 堆叠面积图) -->
+                                    <div class="trend-mode-container" style="display: flex; background: var(--bg-secondary, #f1f5f9); padding: 3px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0);">
+                                        <button id="btnTrendModeLine" class="trend-mode-btn active" onclick="changeTrendMode('line')" style="padding: 4px 10px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; background: var(--card-bg-color, #ffffff); color: var(--text-color, #1e293b); box-shadow: 0 1px 3px rgba(0,0,0,0.1);">📈 折线图</button>
+                                        <button id="btnTrendModeArea" class="trend-mode-btn" onclick="changeTrendMode('area')" style="padding: 4px 10px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; background: transparent; color: var(--text-secondary, #64748b);">📊 堆叠面积</button>
+                                    </div>
+
+                                    <!-- 平滑度滑钮 -->
+                                    <div class="trend-smooth-container" style="display: flex; align-items: center; gap: 6px; background: var(--bg-secondary, #f1f5f9); padding: 3px 8px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0); height: 32px; box-sizing: border-box;">
+                                        <span style="font-size: 12px; font-weight: 500; color: var(--text-secondary, #64748b);">平滑 (EMA):</span>
+                                        <input type="range" id="trendSmoothSlider" min="0" max="0.9" stroke-width="2" step="0.05" value="0" style="width: 70px; height: 4px; cursor: pointer; accent-color: var(--primary-color);">
+                                        <span id="trendSmoothValue" style="font-size: 12px; font-weight: 600; color: var(--text-color, #1e293b); min-width: 26px; text-align: right;">0.00</span>
+                                    </div>
+
                                     <!-- 出现频率/频次切换 -->
-                                    <div class="trend-y-toggle-container" style="display: flex; background: var(--bg-secondary, #f1f5f9); padding: 4px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0);">
-                                        <button id="btnTrendYRate" class="trend-y-btn active" onclick="changeTrendYType('rate')" style="padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; background: var(--card-bg-color, #ffffff); color: var(--text-color, #1e293b); box-shadow: 0 1px 3px rgba(0,0,0,0.1);">出现频率</button>
-                                        <button id="btnTrendYCount" class="trend-y-btn" onclick="changeTrendYType('count')" style="padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; background: transparent; color: var(--text-secondary, #64748b);">出现频次</button>
+                                    <div class="trend-y-toggle-container" style="display: flex; background: var(--bg-secondary, #f1f5f9); padding: 3px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0);">
+                                        <button id="btnTrendYRate" class="trend-y-btn active" onclick="changeTrendYType('rate')" style="padding: 4px 10px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; background: var(--card-bg-color, #ffffff); color: var(--text-color, #1e293b); box-shadow: 0 1px 3px rgba(0,0,0,0.1);">频率 %</button>
+                                        <button id="btnTrendYCount" class="trend-y-btn" onclick="changeTrendYType('count')" style="padding: 4px 10px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; background: transparent; color: var(--text-secondary, #64748b);">频次</button>
                                     </div>
                                 </div>
                             </div>
-                            <div class="statistics-card" id="trendChartCard" style="height: 500px; display: flex; flex-direction: column; justify-content: center; align-items: center; box-sizing: border-box; position: relative;">
-                                <div id="trendChart" style="width: 100%; height: 100%;"></div>
+                            <div class="statistics-card" id="trendChartCard" style="height: auto; min-height: 480px; display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; box-sizing: border-box; position: relative; padding: 20px;">
+                                <div id="trendChart" style="width: 100%; height: 380px; position: relative;"></div>
+                                <!-- 交互式响应式图例底栏 -->
+                                <div id="trendLegendContainer" style="margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--border-color, #e2e8f0); display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center;"></div>
                             </div>
                         </div>
                     </div>
