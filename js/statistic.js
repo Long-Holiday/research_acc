@@ -930,30 +930,30 @@ window.updateTrendChart = function() {
   let targetKeywords = [];
 
   if (currentTrendGroup === 'mainstream') {
-    // 🌟 主流方向：按出现频次/频率从高到低排序取前 6
+    // 🌟 主流方向：按出现频次/频率从高到低排序取前 12
     targetKeywords = [...allFilteredKeywords]
       .sort((a, b) => (currentTrendYType === 'count' ? b.count - a.count : b.rate - a.rate))
-      .slice(0, 6)
+      .slice(0, 12)
       .map(k => k.keyword);
   } else if (currentTrendGroup === 'emerging') {
-    // 🚀 新兴趋势：按增长率从高到低排序（必须有正增长）取前 6
-    const positiveGrowth = allFilteredKeywords.filter(k => (k.growth_rate || 0) > 0.05);
+    // 🚀 新兴趋势：按增长率从高到低排序（优先正增长）取前 12
+    const positiveGrowth = allFilteredKeywords.filter(k => (k.growth_rate || 0) > 0.02);
     targetKeywords = [...(positiveGrowth.length > 0 ? positiveGrowth : allFilteredKeywords)]
       .sort((a, b) => (b.growth_rate || 0) - (a.growth_rate || 0))
-      .slice(0, 6)
+      .slice(0, 12)
       .map(k => k.keyword);
   } else if (currentTrendGroup === 'cooling') {
-    // 📉 关注减退：按增长率最低（负增长）且具备一定基础频次的词取前 6
+    // 📉 关注减退：按增长率最低（负增长）且具备一定基础频次的词取前 12
     const coolingKw = allFilteredKeywords.filter(k => (k.growth_rate || 0) < 0 && (k.count || 0) >= 2);
     targetKeywords = [...(coolingKw.length > 0 ? coolingKw : allFilteredKeywords)]
       .sort((a, b) => (a.growth_rate || 0) - (b.growth_rate || 0))
-      .slice(0, 6)
+      .slice(0, 12)
       .map(k => k.keyword);
   } else {
-    // 全部 Top：结合主流 top 4 + 新兴 top 3 + 衰退 top 2 (去除重复)，控制总线数在 6~8 条避免混杂
-    const topMain = [...allFilteredKeywords].sort((a, b) => b.count - a.count).slice(0, 4);
-    const topEmerg = [...allFilteredKeywords].filter(k => (k.growth_rate || 0) > 0.1).sort((a, b) => b.growth_rate - a.growth_rate).slice(0, 3);
-    const topCool = [...allFilteredKeywords].filter(k => (k.growth_rate || 0) < 0 && k.count >= 2).sort((a, b) => a.growth_rate - b.growth_rate).slice(0, 2);
+    // 全部 Top：结合主流 top 6 + 新兴 top 5 + 衰退 top 4 (去除重复)，共 15 条展示丰富数据
+    const topMain = [...allFilteredKeywords].sort((a, b) => b.count - a.count).slice(0, 6);
+    const topEmerg = [...allFilteredKeywords].filter(k => (k.growth_rate || 0) > 0.05).sort((a, b) => b.growth_rate - a.growth_rate).slice(0, 5);
+    const topCool = [...allFilteredKeywords].filter(k => (k.growth_rate || 0) < 0 && k.count >= 2).sort((a, b) => a.growth_rate - b.growth_rate).slice(0, 4);
     
     const combinedSet = new Set([
       ...topMain.map(k => k.keyword),
@@ -962,9 +962,9 @@ window.updateTrendChart = function() {
     ]);
     
     if (combinedSet.size === 0) {
-      allFilteredKeywords.slice(0, 6).forEach(k => combinedSet.add(k.keyword));
+      allFilteredKeywords.slice(0, 12).forEach(k => combinedSet.add(k.keyword));
     }
-    targetKeywords = Array.from(combinedSet).slice(0, 8);
+    targetKeywords = Array.from(combinedSet).slice(0, 15);
   }
 
   if (targetKeywords.length === 0) {
@@ -1762,10 +1762,10 @@ function drawQuadrantChart(keywords) {
 
   // 1. 绘制四个象限背景块
   const quadrants = [
-    { x: xScale(midX), y: 0, w: width - xScale(midX), h: yScale(midY), color: 'rgba(240, 253, 244, 0.65)', label: '🌟 核心主流 (Hot Mainstream)', textColor: '#15803d' },
-    { x: 0, y: 0, w: xScale(midX), h: yScale(midY), color: 'rgba(239, 246, 255, 0.65)', label: '🚀 新兴趋势 (Emerging)', textColor: '#1d4ed8' },
-    { x: 0, y: yScale(midY), w: xScale(midX), h: height - yScale(midY), color: 'rgba(248, 250, 252, 0.65)', label: '💤 边缘/低频 (Low Focus)', textColor: '#64748b' },
-    { x: xScale(midX), y: yScale(midY), w: width - xScale(midX), h: height - yScale(midY), color: 'rgba(255, 241, 242, 0.65)', label: '📉 关注减退 (Cooling Down)', textColor: '#be123c' }
+    { x: xScale(midX), y: 0, w: width - xScale(midX), h: yScale(midY), color: 'rgba(240, 253, 244, 0.45)', label: '🌟 核心主流 (Hot Mainstream)', textColor: '#15803d' },
+    { x: 0, y: 0, w: xScale(midX), h: yScale(midY), color: 'rgba(239, 246, 255, 0.45)', label: '🚀 新兴趋势 (Emerging)', textColor: '#1d4ed8' },
+    { x: 0, y: yScale(midY), w: xScale(midX), h: height - yScale(midY), color: 'rgba(248, 250, 252, 0.45)', label: '💤 边缘/低频 (Low Focus)', textColor: '#64748b' },
+    { x: xScale(midX), y: yScale(midY), w: width - xScale(midX), h: height - yScale(midY), color: 'rgba(255, 241, 242, 0.45)', label: '📉 关注减退 (Cooling Down)', textColor: '#be123c' }
   ];
 
   quadrants.forEach(q => {
@@ -1780,11 +1780,11 @@ function drawQuadrantChart(keywords) {
 
       svg.append('text')
         .attr('x', q.x + 10)
-        .attr('y', q.y + 20)
+        .attr('y', q.y + 18)
         .style('font-size', '12px')
-        .style('font-weight', '600')
+        .style('font-weight', '700')
         .style('fill', q.textColor)
-        .style('opacity', 0.8)
+        .style('opacity', 0.85)
         .text(q.label);
     }
   });
@@ -1793,12 +1793,12 @@ function drawQuadrantChart(keywords) {
   svg.append('line')
     .attr('x1', xScale(midX)).attr('y1', 0)
     .attr('x2', xScale(midX)).attr('y2', height)
-    .style('stroke', '#cbd5e1').style('stroke-dasharray', '4,4').style('stroke-width', '1.5');
+    .style('stroke', '#94a3b8').style('stroke-dasharray', '4,4').style('stroke-width', '1.5');
 
   svg.append('line')
     .attr('x1', 0).attr('y1', yScale(midY))
     .attr('x2', width).attr('y2', yScale(midY))
-    .style('stroke', '#cbd5e1').style('stroke-dasharray', '4,4').style('stroke-width', '1.5');
+    .style('stroke', '#94a3b8').style('stroke-dasharray', '4,4').style('stroke-width', '1.5');
 
   // 3. 坐标轴
   const xAxis = d3.axisBottom(xScale).ticks(5);
@@ -1831,7 +1831,16 @@ function drawQuadrantChart(keywords) {
     .style('fill', '#64748b')
     .text('近期增长率 (Growth %) →');
 
-  // 4. 浮动 Tooltip
+  // 4. 使用 D3 力导向防重叠碰撞微调，避免近距离文字和圆点重叠
+  const simulation = d3.forceSimulation(scatterData)
+    .force('x', d3.forceX(d => xScale(d.valueX)).strength(0.85))
+    .force('y', d3.forceY(d => yScale(d.growth_percent)).strength(0.85))
+    .force('collide', d3.forceCollide(d => Math.max(12, Math.min(24, Math.sqrt(d.count) * 2.2 + 6))).iterations(4))
+    .stop();
+
+  for (let i = 0; i < 120; ++i) simulation.tick();
+
+  // 5. 浮动 Tooltip
   const tooltip = d3.select(container).append('div')
     .attr('class', 'network-tooltip')
     .style('position', 'absolute')
@@ -1839,37 +1848,44 @@ function drawQuadrantChart(keywords) {
     .style('pointer-events', 'none')
     .style('opacity', 0);
 
-  // 5. 绘制散点节点与文本
+  // 6. 绘制散点节点与文本
   const nodes = svg.selectAll('.quadrant-node')
     .data(scatterData)
     .enter()
     .append('g')
     .attr('class', 'quadrant-node')
-    .attr('transform', d => `translate(${xScale(d.valueX)},${yScale(d.growth_percent)})`)
+    .attr('transform', d => `translate(${d.x},${d.y})`)
     .style('cursor', 'pointer');
 
   nodes.append('circle')
     .attr('r', d => Math.max(6, Math.min(16, Math.sqrt(d.count) * 2.2)))
     .style('fill', d => {
       if (d.growth_percent > 0 && d.valueX >= midX) return '#10b981'; // 绿
-      if (d.growth_percent > 0 && d.valueX < midX) return '#3b82f6';  // 蓝
+      if (d.growth_percent > 0 && d.valueX < midX) return '#2563eb';  // 蓝
       if (d.growth_percent <= 0 && d.valueX >= midX) return '#ef4444'; // 红
-      return '#94a3b8'; // 灰
+      return '#64748b'; // 灰
     })
-    .style('opacity', 0.85)
+    .style('opacity', 0.9)
     .style('stroke', '#ffffff')
     .style('stroke-width', 2);
 
   nodes.append('text')
-    .attr('x', 8)
+    .attr('x', 9)
     .attr('y', 4)
     .style('font-size', '11px')
-    .style('font-weight', '500')
-    .style('fill', '#334155')
+    .style('font-weight', '600')
+    .style('fill', '#0f172a')
+    .style('paint-order', 'stroke fill')
+    .style('stroke', '#ffffff')
+    .style('stroke-width', '3px')
+    .style('stroke-linejoin', 'round')
     .style('pointer-events', 'none')
     .text(d => d.keyword);
 
   nodes.on('mouseover', function(event, d) {
+    // 移至最上层，避免被其他点覆盖
+    this.parentNode.appendChild(this);
+    
     d3.select(this).select('circle').attr('r', d => Math.max(9, Math.min(20, Math.sqrt(d.count) * 2.5))).style('opacity', 1);
     tooltip.transition().duration(100).style('opacity', 0.95);
 
@@ -1887,7 +1903,7 @@ function drawQuadrantChart(keywords) {
     tooltip.style('left', (matrix[0] + 15) + 'px').style('top', (matrix[1] - 40) + 'px');
   })
   .on('mouseout', function() {
-    d3.select(this).select('circle').attr('r', d => Math.max(6, Math.min(16, Math.sqrt(d.count) * 2.2))).style('opacity', 0.85);
+    d3.select(this).select('circle').attr('r', d => Math.max(6, Math.min(16, Math.sqrt(d.count) * 2.2))).style('opacity', 0.9);
     tooltip.transition().duration(100).style('opacity', 0);
   })
   .on('click', function(event, d) {
