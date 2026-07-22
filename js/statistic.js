@@ -28,7 +28,40 @@ let keywordChartInstance = null;
 let currentKeywordsData = [];
 let currentDistDimension = 'category';
 let currentTrendYType = 'rate'; // 'rate' or 'count'
+let currentTrendGroup = 'all'; // 'all', 'mainstream', 'emerging', 'cooling'
 window.globalSmoothness = 0;
+
+function changeTrendGroup(group) {
+  if (currentTrendGroup === group) return;
+  currentTrendGroup = group;
+  updateTrendGroupUI(group);
+  if (window.updateTrendChart) {
+    window.updateTrendChart();
+  }
+}
+
+function updateTrendGroupUI(group) {
+  const btnAll = document.getElementById('btnTrendGroupAll');
+  const btnMainstream = document.getElementById('btnTrendGroupMainstream');
+  const btnEmerging = document.getElementById('btnTrendGroupEmerging');
+  const btnCooling = document.getElementById('btnTrendGroupCooling');
+  
+  [btnAll, btnMainstream, btnEmerging, btnCooling].forEach(btn => {
+    if (!btn) return;
+    btn.style.background = 'transparent';
+    btn.style.color = 'var(--text-secondary, #64748b)';
+    btn.style.boxShadow = 'none';
+  });
+
+  const activeBtn = group === 'mainstream' ? btnMainstream :
+                    group === 'emerging' ? btnEmerging :
+                    group === 'cooling' ? btnCooling : btnAll;
+  if (activeBtn) {
+    activeBtn.style.background = 'var(--card-bg-color, #ffffff)';
+    activeBtn.style.color = 'var(--text-color, #1e293b)';
+    activeBtn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+  }
+}
 
 // ==========================================
 // Shared Utility Helpers
@@ -693,6 +726,9 @@ async function renderCategoryStats(categories, validDatesInRange) {
   const trendCategoryName = document.getElementById('trendCategoryName');
   if (trendCategoryName) trendCategoryName.textContent = categoryDisplayName;
   
+  const quadrantCategoryName = document.getElementById('quadrantCategoryName');
+  if (quadrantCategoryName) quadrantCategoryName.textContent = categoryDisplayName;
+
   const networkCategoryName = document.getElementById('networkCategoryName');
   if (networkCategoryName) networkCategoryName.textContent = categoryDisplayName;
   
@@ -702,6 +738,8 @@ async function renderCategoryStats(categories, validDatesInRange) {
   const loadingSpinnerHTML = createLoadingHTML();
   if (hotKeywordsList) hotKeywordsList.innerHTML = loadingSpinnerHTML;
   if (trendChartCard) trendChartCard.innerHTML = loadingSpinnerHTML;
+  const quadrantContainer = document.getElementById('quadrantContainer');
+  if (quadrantContainer) quadrantContainer.innerHTML = loadingSpinnerHTML;
   if (netContainer) netContainer.innerHTML = loadingSpinnerHTML;
   if (distSection) distSection.style.display = 'block';
 
@@ -884,54 +922,64 @@ window.updateTrendChart = function() {
       return;
   }
 
-  // 2. 按日期对每日趋势进行分组
-  const dailyGroupMap = new Map();
-  validDailyTrends.forEach(item => {
-    if (!dailyGroupMap.has(item.date)) {
-      dailyGroupMap.set(item.date, []);
+  // 2. 收集非排除关键词并根据 currentTrendGroup 筛选合适展现的关键词列表
+  const kwOverallMap = new Map();
+  currentKeywordsData.filter(kw => !excludedSet.has(kw.keyword)).forEach(kw => kwOverallMap.set(kw.keyword, kw));
+
+  const allFilteredKeywords = Array.from(kwOverallMap.values());
+  let targetKeywords = [];
+
+  if (currentTrendGroup === 'mainstream') {
+    // 🌟 主流方向：按出现频次/频率从高到低排序取前 6
+    targetKeywords = [...allFilteredKeywords]
+      .sort((a, b) => (currentTrendYType === 'count' ? b.count - a.count : b.rate - a.rate))
+      .slice(0, 6)
+      .map(k => k.keyword);
+  } else if (currentTrendGroup === 'emerging') {
+    // 🚀 新兴趋势：按增长率从高到低排序（必须有正增长）取前 6
+    const positiveGrowth = allFilteredKeywords.filter(k => (k.growth_rate || 0) > 0.05);
+    targetKeywords = [...(positiveGrowth.length > 0 ? positiveGrowth : allFilteredKeywords)]
+      .sort((a, b) => (b.growth_rate || 0) - (a.growth_rate || 0))
+      .slice(0, 6)
+      .map(k => k.keyword);
+  } else if (currentTrendGroup === 'cooling') {
+    // 📉 关注减退：按增长率最低（负增长）且具备一定基础频次的词取前 6
+    const coolingKw = allFilteredKeywords.filter(k => (k.growth_rate || 0) < 0 && (k.count || 0) >= 2);
+    targetKeywords = [...(coolingKw.length > 0 ? coolingKw : allFilteredKeywords)]
+      .sort((a, b) => (a.growth_rate || 0) - (b.growth_rate || 0))
+      .slice(0, 6)
+      .map(k => k.keyword);
+  } else {
+    // 全部 Top：结合主流 top 4 + 新兴 top 3 + 衰退 top 2 (去除重复)，控制总线数在 6~8 条避免混杂
+    const topMain = [...allFilteredKeywords].sort((a, b) => b.count - a.count).slice(0, 4);
+    const topEmerg = [...allFilteredKeywords].filter(k => (k.growth_rate || 0) > 0.1).sort((a, b) => b.growth_rate - a.growth_rate).slice(0, 3);
+    const topCool = [...allFilteredKeywords].filter(k => (k.growth_rate || 0) < 0 && k.count >= 2).sort((a, b) => a.growth_rate - b.growth_rate).slice(0, 2);
+    
+    const combinedSet = new Set([
+      ...topMain.map(k => k.keyword),
+      ...topEmerg.map(k => k.keyword),
+      ...topCool.map(k => k.keyword)
+    ]);
+    
+    if (combinedSet.size === 0) {
+      allFilteredKeywords.slice(0, 6).forEach(k => combinedSet.add(k.keyword));
     }
-    dailyGroupMap.get(item.date).push(item);
-  });
+    targetKeywords = Array.from(combinedSet).slice(0, 8);
+  }
 
-  // 3. 计算每天的 Top 5 关键词（根据当前 selected currentTrendYType 指标排序）并取并集
-  const dailyTop5KeywordsSet = new Set();
-  dailyGroupMap.forEach((itemsOnDate) => {
-    const sortedItems = [...itemsOnDate].sort((a, b) => {
-      const valA = currentTrendYType === 'count' ? (a.count || 0) : (a.rate || 0);
-      const valB = currentTrendYType === 'count' ? (b.count || 0) : (b.rate || 0);
-      return valB - valA;
-    });
-    sortedItems.slice(0, 5).forEach(item => {
-      dailyTop5KeywordsSet.add(item.keyword);
-    });
-  });
-
-  if (dailyTop5KeywordsSet.size === 0) {
+  if (targetKeywords.length === 0) {
       trendChartCard.innerHTML = '<div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);"><p>暂无趋势图 / No trend data after filtering.</p></div>';
       return;
   }
 
-  // 4. 按总体 Count 或 Rate 将这些关键词进行排序，便于图例和对比展示
-  const kwOverallMap = new Map();
-  currentKeywordsData.forEach(kw => kwOverallMap.set(kw.keyword, kw));
-
-  const sortedTopKeywords = Array.from(dailyTop5KeywordsSet).sort((a, b) => {
-    const kwA = kwOverallMap.get(a);
-    const kwB = kwOverallMap.get(b);
-    if (currentTrendYType === 'count') {
-      return ((kwB ? kwB.count : 0) - (kwA ? kwA.count : 0));
-    } else {
-      return ((kwB ? kwB.rate : 0) - (kwA ? kwA.rate : 0));
-    }
-  });
-
-  // 5. 为每个关键词在全部选定日期 validDates 上组装趋势点，不存在数据的日期补 0
+  // 3. 为每个选中的关键词在全部选定日期 validDates 上组装趋势点，不存在数据的日期补 0
   const trendLookup = new Map();
   validDailyTrends.forEach(item => {
     trendLookup.set(`${item.keyword}_${item.date}`, item);
   });
 
-  const trendData = sortedTopKeywords.map(keyword => {
+  const trendData = targetKeywords.map(keyword => {
+    const kwMeta = kwOverallMap.get(keyword) || {};
     const values = validDates.map(dateStr => {
       const found = trendLookup.get(`${keyword}_${dateStr}`);
       const count = found ? (found.count || 0) : 0;
@@ -946,6 +994,9 @@ window.updateTrendChart = function() {
 
     return {
       keyword: keyword,
+      growth_rate: kwMeta.growth_rate || 0,
+      count: kwMeta.count || 0,
+      rate: kwMeta.rate || 0,
       values: values
     };
   });
@@ -1026,13 +1077,19 @@ window.updateCharts = function() {
   // 2. Trend Chart
   window.updateTrendChart();
 
-  // 3. Distribution Chart
+  // 3. Quadrant Matrix Chart
+  const quadrantContainer = document.getElementById('quadrantContainer');
+  if (quadrantContainer) {
+    setTimeout(() => drawQuadrantChart(keywords), 50);
+  }
+
+  // 4. Distribution Chart
   if (distSection) {
     distSection.style.display = 'block';
     setTimeout(() => drawDistributionChart(keywords), 50);
   }
 
-  // 4. Network Chart (filter out excluded nodes/links client-side)
+  // 5. Network Chart (filter out excluded nodes/links client-side)
   if (netContainer && window.currentNetworkData) {
     const netData = {
       nodes: window.currentNetworkData.nodes.filter(n => !excludedSet.has(n.id)),
@@ -1292,11 +1349,9 @@ function drawTrendChart(trendData, validDatesInRange) {
   const alpha = 1 - (window.globalSmoothness || 0);
   const smoothedTrendData = trendData.map(d => {
     const originalValues = d.values;
-    if (originalValues.length === 0) return { keyword: d.keyword, values: [] };
+    if (originalValues.length === 0) return { keyword: d.keyword, growth_rate: d.growth_rate, count: d.count, rate: d.rate, values: [] };
     
     const smoothedValues = [];
-    
-    // 第一个值作为初始值
     smoothedValues.push({
       ...originalValues[0],
       originalValue: originalValues[0].value,
@@ -1317,14 +1372,17 @@ function drawTrendChart(trendData, validDatesInRange) {
     
     return {
       keyword: d.keyword,
+      growth_rate: d.growth_rate,
+      count: d.count,
+      rate: d.rate,
       values: smoothedValues
     };
   });
 
-  const legendItemWidth = 135;
+  const legendItemWidth = 145;
   const rawWidth = chartElement.offsetWidth || 600;
-  const leftMargin = 60;
-  const rightMargin = 35;
+  const leftMargin = 55;
+  const rightMargin = 135; // 预留右侧放置末端直接标签的空间
   const plotWidth = Math.max(100, rawWidth - leftMargin - rightMargin);
 
   const itemsPerRow = Math.max(1, Math.floor(plotWidth / legendItemWidth));
@@ -1336,7 +1394,7 @@ function drawTrendChart(trendData, validDatesInRange) {
   
   const margin = {top: topMargin, right: rightMargin, bottom: bottomMargin, left: leftMargin};
   const width = plotWidth;
-  const totalSvgHeight = 450;
+  const totalSvgHeight = 470;
   const height = Math.max(150, totalSvgHeight - margin.top - margin.bottom);
 
   // 清除旧的 SVG
@@ -1360,78 +1418,58 @@ function drawTrendChart(trendData, validDatesInRange) {
     .nice()
     .range([height, 0]);
 
-  // 创建颜色比例尺，使用丰富的多色调色板以适应多条趋势线
+  // 创建现代调色板
   const customColors = [
-    '#4e79a7', '#f28e2c', '#59a14f', '#e15759', '#76b7b2', 
-    '#edc949', '#af7aa1', '#ff9da7', '#9c755f', '#bab0ab',
-    '#2563eb', '#d97706', '#059669', '#dc2626', '#7c3aed',
-    '#0891b2', '#db2777', '#475569', '#65a30d', '#ea580c',
-    '#0284c7', '#16a34a', '#b91c1c', '#9333ea', '#0d9488'
+    '#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
+    '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#6366f1'
   ];
   const color = d3.scaleOrdinal().range(customColors);
 
-  // 提取 X 轴刻度，避免重复日期
+  // 提取 X 轴刻度
   const tickValues = [];
   const step = Math.max(1, Math.ceil(validDatesInRange.length / 8));
   for (let i = 0; i < validDatesInRange.length; i += step) {
     tickValues.push(new Date(validDatesInRange[i] + 'T00:00:00Z'));
   }
 
-  // 添加X轴网格线
+  // 网格线
   svg.append('g')
     .attr('class', 'grid')
     .attr('transform', `translate(0,${height})`)
     .style('stroke-dasharray', '3,3')
     .style('opacity', 0.1)
-    .call(d3.axisBottom(x)
-      .tickValues(tickValues)
-      .tickSize(-height)
-      .tickFormat(''));
+    .call(d3.axisBottom(x).tickValues(tickValues).tickSize(-height).tickFormat(''));
 
-  // 添加Y轴网格线
   svg.append('g')
     .attr('class', 'grid')
     .style('stroke-dasharray', '3,3')
     .style('opacity', 0.1)
-    .call(d3.axisLeft(y)
-      .tickSize(-width)
-      .tickFormat(''));
+    .call(d3.axisLeft(y).tickSize(-width).tickFormat(''));
 
-  // 确定合适的日期格式
   function determineDateFormat(dates) {
     const startDate = new Date(dates[0] + 'T00:00:00Z');
     const endDate = new Date(dates[dates.length - 1] + 'T00:00:00Z');
-    
     const sameYear = startDate.getFullYear() === endDate.getFullYear();
     const sameMonth = sameYear && startDate.getMonth() === endDate.getMonth();
-    
-    if (sameMonth) {
-      return d3.timeFormat("%d");
-    } else if (sameYear) {
-      return d3.timeFormat("%m-%d");
-    } else {
-      return d3.timeFormat("%Y-%m-%d");
-    }
+    return sameMonth ? d3.timeFormat("%d") : sameYear ? d3.timeFormat("%m-%d") : d3.timeFormat("%Y-%m-%d");
   }
 
   const dateFormat = determineDateFormat(validDatesInRange);
   
-  // 添加X轴
+  // X 轴
   svg.append('g')
     .attr('class', 'x-axis')
     .attr('transform', `translate(0,${height})`)
-    .call(d3.axisBottom(x)
-      .tickValues(tickValues)
-      .tickFormat(dateFormat))
+    .call(d3.axisBottom(x).tickValues(tickValues).tickFormat(dateFormat))
     .selectAll("text")
     .style("text-anchor", "end")
     .style("font-size", "11px")
-    .style("fill", "#666")
+    .style("fill", "#64748b")
     .attr("dx", "-.8em")
     .attr("dy", ".15em")
     .attr("transform", "rotate(-45)");
 
-  // 添加Y轴
+  // Y 轴
   const yAxis = d3.axisLeft(y).ticks(5);
   if (currentTrendYType === 'rate') {
     yAxis.tickFormat(d => d + '%');
@@ -1442,82 +1480,48 @@ function drawTrendChart(trendData, validDatesInRange) {
     .call(yAxis)
     .selectAll("text")
     .style("font-size", "11px")
-    .style("fill", "#666");
+    .style("fill", "#64748b");
 
-  // 添加Y轴标题
-  const yAxisLabelText = currentTrendYType === 'count' ? "出现频次 (Frequency)" : "出现频率 (Frequency Rate)";
+  // 轴线与文本
   svg.append("text")
     .attr("transform", "rotate(-90)")
     .attr("y", 0 - margin.left)
     .attr("x", 0 - (height / 2))
     .attr("dy", "1em")
     .style("text-anchor", "middle")
-    .style("fill", "#666")
+    .style("fill", "#64748b")
     .style("font-size", "11px")
-    .text(yAxisLabelText);
-
-  // 添加X轴标题
-  const latestDate = new Date(validDatesInRange[0] + 'T00:00:00Z');
-  const earliestDate = new Date(validDatesInRange[validDatesInRange.length - 1] + 'T00:00:00Z');
-  let xAxisTitle = "";
-  
-  if (latestDate.getFullYear() === earliestDate.getFullYear()) {
-    if (latestDate.getMonth() === earliestDate.getMonth()) {
-      xAxisTitle = `${latestDate.getFullYear()}/${String(latestDate.getMonth() + 1).padStart(2, '0')}`;
-    } else {
-      xAxisTitle = `${latestDate.getFullYear()}`;
-    }
-  }
-  
-  if (xAxisTitle) {
-    svg.append("text")
-      .attr("transform", `translate(${width/2}, ${height + 36})`)
-      .style("text-anchor", "middle")
-      .style("fill", "#666")
-      .style("font-size", "12px")
-      .text(xAxisTitle);
-  }
+    .text(currentTrendYType === 'count' ? "出现频次 (Frequency)" : "出现频率 (Frequency Rate %)");
 
   svg.selectAll('.x-axis path, .y-axis path, .x-axis line, .y-axis line')
-    .style('stroke', '#ccc')
+    .style('stroke', '#e2e8f0')
     .style('stroke-width', '1px');
 
-  // 定义面积生成器
+  // 生成器
   const area = d3.area()
     .x(d => x(d.date))
     .y0(height)
     .y1(d => y(d.value))
     .curve(d3.curveMonotoneX);
 
-  // 定义线条生成器
   const line = d3.line()
     .x(d => x(d.date))
     .y(d => y(d.value))
     .curve(d3.curveMonotoneX);
 
-  // 添加渐变定义
+  // 渐变定义
   const gradient = svg.append("defs")
     .selectAll("linearGradient")
     .data(smoothedTrendData)
     .enter()
     .append("linearGradient")
     .attr("id", (d, i) => `gradient-${i}`)
-    .attr("x1", "0%")
-    .attr("y1", "0%")
-    .attr("x2", "0%")
-    .attr("y2", "100%");
+    .attr("x1", "0%").attr("y1", "0%").attr("x2", "0%").attr("y2", "100%");
 
-  gradient.append("stop")
-    .attr("offset", "0%")
-    .attr("stop-color", d => color(d.keyword))
-    .attr("stop-opacity", 0.25);
+  gradient.append("stop").attr("offset", "0%").attr("stop-color", d => color(d.keyword)).attr("stop-opacity", 0.35);
+  gradient.append("stop").attr("offset", "100%").attr("stop-color", d => color(d.keyword)).attr("stop-opacity", 0.01);
 
-  gradient.append("stop")
-    .attr("offset", "100%")
-    .attr("stop-color", d => color(d.keyword))
-    .attr("stop-opacity", 0.01);
-
-  // 绘制面积
+  // 绘制面积（默认透明，Hover 时高亮）
   const areas = svg.selectAll('.area')
     .data(smoothedTrendData)
     .enter()
@@ -1525,9 +1529,9 @@ function drawTrendChart(trendData, validDatesInRange) {
       .attr('class', 'area')
       .attr('d', d => area(d.values))
       .style('fill', (d, i) => `url(#gradient-${i})`)
-      .style('opacity', 0.6);
+      .style('opacity', 0);
 
-  // 绘制折线
+  // 绘制折线（加粗清晰）
   const paths = svg.selectAll('.line')
     .data(smoothedTrendData)
     .enter()
@@ -1539,14 +1543,42 @@ function drawTrendChart(trendData, validDatesInRange) {
       .style('stroke-width', 2.5)
       .style('opacity', 0.85);
 
-  // 创建提示框元素 (trend tooltip)
+  // 绘制末端直接标注 (Direct End Labeling)
+  const endLabelsG = svg.append('g').attr('class', 'end-labels-group');
+  smoothedTrendData.forEach((d, i) => {
+    if (!d.values || d.values.length === 0) return;
+    const lastPoint = d.values[d.values.length - 1];
+    const endX = x(lastPoint.date) + 6;
+    const endY = y(lastPoint.value);
+
+    const rateVal = Math.round((d.growth_rate || 0) * 100);
+    const badgeStr = rateVal > 0 ? `+${rateVal}% 🚀` : rateVal < 0 ? `${rateVal}% 📉` : `0%`;
+
+    const labelG = endLabelsG.append('g')
+      .attr('class', `end-label-${i}`)
+      .attr('transform', `translate(${endX}, ${endY})`)
+      .style('cursor', 'pointer')
+      .on('click', () => {
+        if (window.showRelatedPapers) window.showRelatedPapers(d.keyword);
+      });
+
+    labelG.append('text')
+      .attr('x', 0)
+      .attr('y', 4)
+      .style('font-size', '11px')
+      .style('font-weight', '600')
+      .style('fill', color(d.keyword))
+      .text(`${d.keyword} (${badgeStr})`);
+  });
+
+  // 提示框元素
   const tooltip = d3.select(chartElement).append("div")
     .attr("class", "network-tooltip")
     .style("position", "absolute")
     .style("z-index", "100")
     .style("pointer-events", "none");
 
-  // 绘制折线节点圆点，增加细节感与交互性
+  // 折线节点圆点
   const dotsG = svg.append('g').attr('class', 'dots-group');
   smoothedTrendData.forEach((d, i) => {
     dotsG.selectAll(`.dot-${i}`)
@@ -1572,7 +1604,7 @@ function drawTrendChart(trendData, validDatesInRange) {
           const smoothedValStr = currentTrendYType === 'count' ? Math.round(v.value) : (v.value.toFixed(2) + '%');
           
           let tooltipHtml = `
-            <div style="font-weight: bold; margin-bottom: 4px;">${d.keyword}</div>
+            <div style="font-weight: bold; margin-bottom: 4px; color: ${color(d.keyword)};">${d.keyword}</div>
             <div style="margin-bottom: 2px;">日期: ${dateStr}</div>
             <div style="margin-bottom: 2px;">原始${displayLabel}: ${originalValStr}</div>
           `;
@@ -1616,49 +1648,253 @@ function drawTrendChart(trendData, validDatesInRange) {
   legend.append('rect')
     .attr('x', 0)
     .attr('y', 0)
-    .attr('width', 14)
-    .attr('height', 14)
+    .attr('width', 12)
+    .attr('height', 12)
     .attr('rx', 3)
     .style('fill', d => color(d.keyword))
-    .style('opacity', 0.85);
+    .style('opacity', 0.9);
 
   legend.append('text')
-    .attr('x', 20)
-    .attr('y', 8)
-    .text(d => d.keyword)
-    .style('font-size', '12px')
+    .attr('x', 18)
+    .attr('y', 7)
+    .text(d => {
+      const rateVal = Math.round((d.growth_rate || 0) * 100);
+      const tagStr = rateVal > 0 ? `+${rateVal}%` : `${rateVal}%`;
+      return `${d.keyword} (${tagStr})`;
+    })
+    .style('font-size', '11px')
     .style('font-weight', '500')
     .style('alignment-baseline', 'middle')
     .style('fill', 'var(--text-color, #333)');
 
-  // 添加交互效果
+  // 交互悬停效果：聚焦高亮
   legend.style('cursor', 'pointer')
     .on('mouseover', function(event, d) {
       const keyword = d.keyword;
       const targetIndex = smoothedTrendData.findIndex(item => item.keyword === keyword);
       
-      areas.style('opacity', 0.05);
-      paths.style('opacity', 0.1);
+      areas.style('opacity', 0);
+      paths.style('opacity', 0.15).style('stroke-width', 1.5);
+      svg.selectAll('.end-labels-group g').style('opacity', 0.15);
       svg.selectAll('.dot').style('opacity', 0);
       
       svg.selectAll('.area')
         .filter(p => p.keyword === keyword)
-        .style('opacity', 0.85);
+        .style('opacity', 0.25);
       
       svg.selectAll('.line')
         .filter(p => p.keyword === keyword)
         .style('opacity', 1)
-        .style('stroke-width', 3.5);
+        .style('stroke-width', 4);
+
+      svg.selectAll(`.end-label-${targetIndex}`)
+        .style('opacity', 1);
 
       svg.selectAll(`.dot-${targetIndex}`)
         .style('opacity', 1)
-        .attr('r', 4.5);
+        .attr('r', 5);
     })
     .on('mouseout', function() {
-      areas.style('opacity', 0.6);
+      areas.style('opacity', 0);
       paths.style('opacity', 0.85).style('stroke-width', 2.5);
+      svg.selectAll('.end-labels-group g').style('opacity', 1);
       svg.selectAll('.dot').style('opacity', 0).attr('r', 4);
     });
+}
+
+/**
+ * 绘制关键词四象限趋势散点图 (Four-Quadrant Trend Matrix Chart)
+ */
+function drawQuadrantChart(keywords) {
+  const container = document.getElementById('quadrantContainer');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const excludedSet = new Set(getExcludedKeywords());
+  const validKeywords = (keywords || []).filter(kw => !excludedSet.has(kw.keyword));
+
+  if (validKeywords.length === 0) {
+    container.innerHTML = createNoDataHTML('暂无四象限数据 / No quadrant data available.');
+    return;
+  }
+
+  // 取 Top 25 个关键词作为散点展现
+  const scatterData = validKeywords.slice(0, 25).map(item => {
+    const rateVal = Math.round((item.growth_rate || 0) * 100);
+    return {
+      keyword: item.keyword,
+      count: item.count || 0,
+      rate: item.rate || 0,
+      growth_rate: item.growth_rate || 0,
+      growth_percent: rateVal,
+      valueX: currentTrendYType === 'count' ? (item.count || 0) : (item.rate || 0)
+    };
+  });
+
+  const rawWidth = container.offsetWidth || 500;
+  const rawHeight = container.offsetHeight || 460;
+
+  const margin = { top: 35, right: 35, bottom: 45, left: 50 };
+  const width = Math.max(200, rawWidth - margin.left - margin.right);
+  const height = Math.max(200, rawHeight - margin.top - margin.bottom);
+
+  const svg = d3.select(container)
+    .append('svg')
+      .attr('width', rawWidth)
+      .attr('height', rawHeight)
+    .append('g')
+      .attr('transform', `translate(${margin.left},${margin.top})`);
+
+  // 计算 X 轴和 Y 轴刻度范围与分割线
+  const xExtent = d3.extent(scatterData, d => d.valueX);
+  const xMin = Math.max(0, (xExtent[0] || 0) * 0.8);
+  const xMax = (xExtent[1] || 10) * 1.15;
+
+  const yExtent = d3.extent(scatterData, d => d.growth_percent);
+  let yMin = Math.min(-20, (yExtent[0] || 0) - 10);
+  let yMax = Math.max(20, (yExtent[1] || 0) + 10);
+
+  const xScale = d3.scaleLinear().domain([xMin, xMax]).nice().range([0, width]);
+  const yScale = d3.scaleLinear().domain([yMin, yMax]).nice().range([height, 0]);
+
+  const midX = (xMin + xMax) / 2;
+  const midY = 0; // 0% 增长率线为分割
+
+  // 1. 绘制四个象限背景块
+  const quadrants = [
+    { x: xScale(midX), y: 0, w: width - xScale(midX), h: yScale(midY), color: 'rgba(240, 253, 244, 0.65)', label: '🌟 核心主流 (Hot Mainstream)', textColor: '#15803d' },
+    { x: 0, y: 0, w: xScale(midX), h: yScale(midY), color: 'rgba(239, 246, 255, 0.65)', label: '🚀 新兴趋势 (Emerging)', textColor: '#1d4ed8' },
+    { x: 0, y: yScale(midY), w: xScale(midX), h: height - yScale(midY), color: 'rgba(248, 250, 252, 0.65)', label: '💤 边缘/低频 (Low Focus)', textColor: '#64748b' },
+    { x: xScale(midX), y: yScale(midY), w: width - xScale(midX), h: height - yScale(midY), color: 'rgba(255, 241, 242, 0.65)', label: '📉 关注减退 (Cooling Down)', textColor: '#be123c' }
+  ];
+
+  quadrants.forEach(q => {
+    if (q.w > 0 && q.h > 0) {
+      svg.append('rect')
+        .attr('x', q.x)
+        .attr('y', q.y)
+        .attr('width', q.w)
+        .attr('height', q.h)
+        .attr('fill', q.color)
+        .attr('rx', 4);
+
+      svg.append('text')
+        .attr('x', q.x + 10)
+        .attr('y', q.y + 20)
+        .style('font-size', '12px')
+        .style('font-weight', '600')
+        .style('fill', q.textColor)
+        .style('opacity', 0.8)
+        .text(q.label);
+    }
+  });
+
+  // 2. 绘制中轴分割线
+  svg.append('line')
+    .attr('x1', xScale(midX)).attr('y1', 0)
+    .attr('x2', xScale(midX)).attr('y2', height)
+    .style('stroke', '#cbd5e1').style('stroke-dasharray', '4,4').style('stroke-width', '1.5');
+
+  svg.append('line')
+    .attr('x1', 0).attr('y1', yScale(midY))
+    .attr('x2', width).attr('y2', yScale(midY))
+    .style('stroke', '#cbd5e1').style('stroke-dasharray', '4,4').style('stroke-width', '1.5');
+
+  // 3. 坐标轴
+  const xAxis = d3.axisBottom(xScale).ticks(5);
+  const yAxis = d3.axisLeft(yScale).ticks(5).tickFormat(d => d + '%');
+
+  svg.append('g')
+    .attr('transform', `translate(0,${height})`)
+    .call(xAxis)
+    .selectAll('text').style('font-size', '10px').style('fill', '#64748b');
+
+  svg.append('g')
+    .call(yAxis)
+    .selectAll('text').style('font-size', '10px').style('fill', '#64748b');
+
+  // X/Y 轴说明文本
+  svg.append('text')
+    .attr('x', width / 2)
+    .attr('y', height + 36)
+    .style('text-anchor', 'middle')
+    .style('font-size', '11px')
+    .style('fill', '#64748b')
+    .text(currentTrendYType === 'count' ? '热度/频次 (Count) →' : '出现频率 (Rate %) →');
+
+  svg.append('text')
+    .attr('transform', 'rotate(-90)')
+    .attr('x', -height / 2)
+    .attr('y', -36)
+    .style('text-anchor', 'middle')
+    .style('font-size', '11px')
+    .style('fill', '#64748b')
+    .text('近期增长率 (Growth %) →');
+
+  // 4. 浮动 Tooltip
+  const tooltip = d3.select(container).append('div')
+    .attr('class', 'network-tooltip')
+    .style('position', 'absolute')
+    .style('z-index', '100')
+    .style('pointer-events', 'none')
+    .style('opacity', 0);
+
+  // 5. 绘制散点节点与文本
+  const nodes = svg.selectAll('.quadrant-node')
+    .data(scatterData)
+    .enter()
+    .append('g')
+    .attr('class', 'quadrant-node')
+    .attr('transform', d => `translate(${xScale(d.valueX)},${yScale(d.growth_percent)})`)
+    .style('cursor', 'pointer');
+
+  nodes.append('circle')
+    .attr('r', d => Math.max(6, Math.min(16, Math.sqrt(d.count) * 2.2)))
+    .style('fill', d => {
+      if (d.growth_percent > 0 && d.valueX >= midX) return '#10b981'; // 绿
+      if (d.growth_percent > 0 && d.valueX < midX) return '#3b82f6';  // 蓝
+      if (d.growth_percent <= 0 && d.valueX >= midX) return '#ef4444'; // 红
+      return '#94a3b8'; // 灰
+    })
+    .style('opacity', 0.85)
+    .style('stroke', '#ffffff')
+    .style('stroke-width', 2);
+
+  nodes.append('text')
+    .attr('x', 8)
+    .attr('y', 4)
+    .style('font-size', '11px')
+    .style('font-weight', '500')
+    .style('fill', '#334155')
+    .style('pointer-events', 'none')
+    .text(d => d.keyword);
+
+  nodes.on('mouseover', function(event, d) {
+    d3.select(this).select('circle').attr('r', d => Math.max(9, Math.min(20, Math.sqrt(d.count) * 2.5))).style('opacity', 1);
+    tooltip.transition().duration(100).style('opacity', 0.95);
+
+    let quadTag = d.growth_percent > 0 ? (d.valueX >= midX ? '🌟 核心主流' : '🚀 新兴趋势') : (d.valueX >= midX ? '📉 关注减退' : '💤 边缘/低频');
+    let content = `
+      <div style="font-weight:bold;margin-bottom:4px;">${d.keyword}</div>
+      <div style="font-size:12px;margin-bottom:2px;">定位: <span style="color:#38bdf8;font-weight:500;">${quadTag}</span></div>
+      <div style="font-size:12px;margin-bottom:2px;">频次: ${Math.round(d.count)} | 频率: ${(d.rate*100).toFixed(2)}%</div>
+      <div style="font-size:12px;">增长率: <span style="color:${d.growth_percent >= 0 ? '#4ade80' : '#f87171'};font-weight:bold;">${d.growth_percent >= 0 ? '+' : ''}${d.growth_percent}%</span></div>
+    `;
+    tooltip.html(content);
+  })
+  .on('mousemove', function(event) {
+    const matrix = d3.pointer(event, container);
+    tooltip.style('left', (matrix[0] + 15) + 'px').style('top', (matrix[1] - 40) + 'px');
+  })
+  .on('mouseout', function() {
+    d3.select(this).select('circle').attr('r', d => Math.max(6, Math.min(16, Math.sqrt(d.count) * 2.2))).style('opacity', 0.85);
+    tooltip.transition().duration(100).style('opacity', 0);
+  })
+  .on('click', function(event, d) {
+    if (window.showRelatedPapers) {
+      window.showRelatedPapers(d.keyword);
+    }
+  });
 }
 
 
