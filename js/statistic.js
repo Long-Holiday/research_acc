@@ -874,45 +874,86 @@ window.updateTrendChart = function() {
   if (!trendChartCard || !window.currentDailyTrends || !currentKeywordsData) return;
 
   const excludedSet = new Set(getExcludedKeywords());
-  const keywords = currentKeywordsData.filter(kw => !excludedSet.has(kw.keyword));
+  const validDates = window.currentValidDatesInRange || [];
   
-  if (keywords.length === 0) {
+  // 1. 过滤排除掉的关键词的每日趋势
+  const validDailyTrends = window.currentDailyTrends.filter(item => !excludedSet.has(item.keyword));
+
+  if (validDailyTrends.length === 0 || validDates.length === 0) {
       trendChartCard.innerHTML = '<div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);"><p>暂无趋势图 / No trend data after filtering.</p></div>';
       return;
   }
 
-  const sortedKeywordsForTrend = [...keywords].sort((a, b) => {
-    if (currentTrendYType === 'count') {
-      return (b.count || 0) - (a.count || 0);
-    } else {
-      return (b.rate || 0) - (a.rate || 0);
+  // 2. 按日期对每日趋势进行分组
+  const dailyGroupMap = new Map();
+  validDailyTrends.forEach(item => {
+    if (!dailyGroupMap.has(item.date)) {
+      dailyGroupMap.set(item.date, []);
     }
+    dailyGroupMap.get(item.date).push(item);
   });
-  const top10Keywords = sortedKeywordsForTrend.slice(0, 10).map(d => d.keyword);
-  const trendMap = new Map();
-  top10Keywords.forEach(k => trendMap.set(k, []));
-  
-  window.currentDailyTrends.forEach(item => {
-    if (trendMap.has(item.keyword)) {
-      const rate = item.rate || 0;
-      trendMap.get(item.keyword).push({
-        date: new Date(item.date + 'T00:00:00Z'),
-        count: item.count,
-        rate: rate,
-        value: currentTrendYType === 'count' ? item.count : rate
-      });
-    }
-  });
-  
-  const trendData = Array.from(trendMap.entries()).map(([keyword, values]) => ({
-    keyword: keyword,
-    values: values.sort((a, b) => a.date - b.date)
-  }));
 
-  if (window.currentValidDatesInRange && window.currentValidDatesInRange.length > 1 && top10Keywords.length > 0) {
+  // 3. 计算每天的 Top 10 关键词（根据当前 selected currentTrendYType 指标排序）并取并集
+  const dailyTop10KeywordsSet = new Set();
+  dailyGroupMap.forEach((itemsOnDate) => {
+    const sortedItems = [...itemsOnDate].sort((a, b) => {
+      const valA = currentTrendYType === 'count' ? (a.count || 0) : (a.rate || 0);
+      const valB = currentTrendYType === 'count' ? (b.count || 0) : (b.rate || 0);
+      return valB - valA;
+    });
+    sortedItems.slice(0, 10).forEach(item => {
+      dailyTop10KeywordsSet.add(item.keyword);
+    });
+  });
+
+  if (dailyTop10KeywordsSet.size === 0) {
+      trendChartCard.innerHTML = '<div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);"><p>暂无趋势图 / No trend data after filtering.</p></div>';
+      return;
+  }
+
+  // 4. 按总体 Count 或 Rate 将这些关键词进行排序，便于图例和对比展示
+  const kwOverallMap = new Map();
+  currentKeywordsData.forEach(kw => kwOverallMap.set(kw.keyword, kw));
+
+  const sortedTopKeywords = Array.from(dailyTop10KeywordsSet).sort((a, b) => {
+    const kwA = kwOverallMap.get(a);
+    const kwB = kwOverallMap.get(b);
+    if (currentTrendYType === 'count') {
+      return ((kwB ? kwB.count : 0) - (kwA ? kwA.count : 0));
+    } else {
+      return ((kwB ? kwB.rate : 0) - (kwA ? kwA.rate : 0));
+    }
+  });
+
+  // 5. 为每个关键词在全部选定日期 validDates 上组装趋势点，不存在数据的日期补 0
+  const trendLookup = new Map();
+  validDailyTrends.forEach(item => {
+    trendLookup.set(`${item.keyword}_${item.date}`, item);
+  });
+
+  const trendData = sortedTopKeywords.map(keyword => {
+    const values = validDates.map(dateStr => {
+      const found = trendLookup.get(`${keyword}_${dateStr}`);
+      const count = found ? (found.count || 0) : 0;
+      const rate = found ? (found.rate || 0) : 0;
+      return {
+        date: new Date(dateStr + 'T00:00:00Z'),
+        count: count,
+        rate: rate,
+        value: currentTrendYType === 'count' ? count : rate
+      };
+    }).sort((a, b) => a.date - b.date);
+
+    return {
+      keyword: keyword,
+      values: values
+    };
+  });
+
+  if (validDates.length > 1 && trendData.length > 0) {
     trendChartCard.innerHTML = `<div id="trendChart" style="width: 100%; height: 100%;"></div>`;
     setTimeout(() => {
-      drawTrendChart(trendData, window.currentValidDatesInRange);
+      drawTrendChart(trendData, validDates);
     }, 50);
   } else {
     trendChartCard.innerHTML = `
@@ -1280,7 +1321,12 @@ function drawTrendChart(trendData, validDatesInRange) {
     };
   });
 
-  const margin = {top: 20, right: 180, bottom: 80, left: 60};
+  const itemsPerCol = 12;
+  const legendCols = Math.max(1, Math.ceil(smoothedTrendData.length / itemsPerCol));
+  const legendColWidth = 135;
+  const rightMargin = Math.max(180, legendCols * legendColWidth + 15);
+
+  const margin = {top: 20, right: rightMargin, bottom: 80, left: 60};
   const width = Math.max(100, chartElement.offsetWidth - margin.left - margin.right);
   const height = 400 - margin.top - margin.bottom;
 
@@ -1305,10 +1351,15 @@ function drawTrendChart(trendData, validDatesInRange) {
     .nice()
     .range([height, 0]);
 
-  // 创建颜色比例尺，使用更柔和的颜色
-  const color = d3.scaleOrdinal()
-    .range(['#4e79a7', '#f28e2c', '#59a14f', '#e15759', '#76b7b2', 
-            '#edc949', '#af7aa1', '#ff9da7', '#9c755f', '#bab0ab']);
+  // 创建颜色比例尺，使用丰富的多色调色板以适应多条趋势线
+  const customColors = [
+    '#4e79a7', '#f28e2c', '#59a14f', '#e15759', '#76b7b2', 
+    '#edc949', '#af7aa1', '#ff9da7', '#9c755f', '#bab0ab',
+    '#2563eb', '#d97706', '#059669', '#dc2626', '#7c3aed',
+    '#0891b2', '#db2777', '#475569', '#65a30d', '#ea580c',
+    '#0284c7', '#16a34a', '#b91c1c', '#9333ea', '#0d9488'
+  ];
+  const color = d3.scaleOrdinal().range(customColors);
 
   // 提取 X 轴刻度，避免重复日期
   const tickValues = [];
@@ -1541,7 +1592,11 @@ function drawTrendChart(trendData, validDatesInRange) {
     .enter()
     .append('g')
       .attr('class', 'legend')
-      .attr('transform', (d, i) => `translate(${width + 20},${i * 24})`);
+      .attr('transform', (d, i) => {
+        const col = Math.floor(i / itemsPerCol);
+        const row = i % itemsPerCol;
+        return `translate(${width + 20 + col * legendColWidth},${row * 22})`;
+      });
 
   legend.append('rect')
     .attr('x', 0)
