@@ -519,13 +519,13 @@ def test_keyword_growth_rate_ols():
         kw_map = {k["keyword"]: k for k in data["keywords"]}
         
         assert "frequent" in kw_map
-        assert kw_map["frequent"]["count"] == 18
-        assert kw_map["frequent"]["growth_rate"] == 3.0
+        assert kw_map["frequent"]["count"] == 6
+        assert kw_map["frequent"]["growth_rate"] == 0.0
         
         # Now check "noisy".
         assert "noisy" in kw_map
         assert kw_map["noisy"]["count"] == 3
-        assert kw_map["noisy"]["growth_rate"] == 0.0
+        assert kw_map["noisy"]["growth_rate"] == 1.0
         
     finally:
         for tf in [test_file_0, test_file_1, test_file_2]:

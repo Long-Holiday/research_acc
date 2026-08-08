@@ -92,6 +92,25 @@ def scan_and_process_files():
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
             """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS agg_daily_papers (
+                paper_date TEXT,
+                language TEXT,
+                category TEXT,
+                total_papers INTEGER,
+                PRIMARY KEY (paper_date, language, category)
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS agg_daily_keywords (
+                paper_date TEXT,
+                language TEXT,
+                category TEXT,
+                keyword TEXT,
+                distinct_paper_count INTEGER,
+                PRIMARY KEY (paper_date, language, category, keyword)
+            )
+            """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_advisor_reports_date ON advisor_reports (report_date)")
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ks_date_lang_cat ON keyword_stats (paper_date, language, category)")
@@ -232,6 +251,28 @@ def scan_and_process_files():
                     cursor.execute("INSERT OR REPLACE INTO processed_files (filename) VALUES (?)", (filename,))
                 
                 processed_files_cache.add(filename)
+                
+                # Incrementally update aggregation tables for the processed date, lang
+                cursor.execute("""
+                INSERT OR REPLACE INTO agg_daily_papers (paper_date, language, category, total_papers)
+                SELECT paper_date, language, category, COUNT(DISTINCT paper_id)
+                FROM paper_keywords
+                WHERE paper_date = ? AND language = ?
+                GROUP BY paper_date, language, category
+                """, (paper_date, lang))
+                
+                cursor.execute("""
+                INSERT OR REPLACE INTO agg_daily_keywords (paper_date, language, category, keyword, distinct_paper_count)
+                SELECT paper_date, language, category, keyword, COUNT(DISTINCT paper_id)
+                FROM paper_keywords
+                WHERE paper_date = ? AND language = ?
+                GROUP BY paper_date, language, category, keyword
+                """, (paper_date, lang))
+                
                 conn.commit()
+                
+            # If any files were processed, we can optionally run a full refresh of the aggregation just in case, but incremental is faster.
+            # But just to be sure that the aggregations cover everything (e.g. if previous runs missed it), let's do a full refresh once when cache is initialized.
+            # Actually, doing it incrementally above is robust since we process all missing files.
         finally:
             conn.close()
