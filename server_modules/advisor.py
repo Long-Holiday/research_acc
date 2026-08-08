@@ -12,7 +12,8 @@ from ai.advisor import (
     get_advisor_topic,
     set_advisor_topic,
     generate_advisor_report,
-    backfill_historical_reports
+    backfill_historical_reports,
+    get_unprocessed_dates
 )
 
 router = APIRouter()
@@ -112,6 +113,11 @@ def generate_report_endpoint(req: GenerateRequest, background_tasks: BackgroundT
 def backfill_reports_endpoint(req: BackfillRequest, background_tasks: BackgroundTasks, token: str = Depends(verify_token)):
     db_path = _get_db_path()
     
+    if not req.force:
+        unprocessed = get_unprocessed_dates(db_path=db_path)
+        if not unprocessed:
+            return {"status": "already_complete", "message": "所有历史数据均已处理完毕"}
+
     def _run_backfill():
         try:
             backfill_historical_reports(db_path=db_path, topic=req.topic, force=req.force)

@@ -32,7 +32,7 @@ for k in list(os.environ.keys()):
     if os.environ[k]:
         os.environ[k] = os.environ[k].strip()
 
-DEFAULT_TOPIC = "遥感图像的处理与信息提取（目标检测、语义分割等）"
+DEFAULT_TOPIC = "计算机视觉算法（含VLM、智能体等）在遥感中的应用"
 DEFAULT_DB_PATH = "data/statistics.db"
 DEFAULT_DATA_DIR = "data"
 
@@ -277,8 +277,8 @@ def generate_stage1_trend_analysis(
     has_month = month_context and "暂无" not in month_context
 
     system_prompt = (
-        "你是遥感图像智能解译（Remote Sensing Image Interpretation）与计算机视觉领域的资深学术导师（博导）、顶会/顶刊审稿人（CVPR/ICCV/ECCV/TGRS/ISPRS）。\n"
-        "你当前指导的课题组聚焦于「{topic}」方向，兼具深厚的理论洞察力和敏锐的技术趋势判断力。\n\n"
+        "你是计算机视觉（Computer Vision）与遥感交叉领域的资深学术导师（博导）、顶会/顶刊审稿人（CVPR/ICCV/ECCV/TGRS/ISPRS）。\n"
+        "你当前指导的课题组聚焦于「计算机视觉算法在遥感中的应用（{topic}）」方向，主要关注视觉大模型（VLM）、AI智能体（Agents）、生成式AI等计算机前沿方向在遥感场景下的交叉创新与落地。\n\n"
         "## 工作准则\n"
         "1. **证据驱动**：所有观点必须锚定到传入论文集中具体论文的编号（如[3]、[17]），不得凭空臆断。\n"
         "2. **深度优先**：点评论文时，聚焦其核心创新机制和方法论突破，而非复述摘要。分析切入角度应当是审稿人视角——指出创新点的成立条件与潜在局限。\n"
@@ -306,7 +306,7 @@ def generate_stage1_trend_analysis(
         "【今日论文集（含AI结构化增强信息）】:\n{papers_text}\n\n"
         "---\n"
         "请按以下格式输出研判报告，每个要点都必须引用具体论文编号：\n\n"
-        "# 今日遥感智能解译前沿与学术导师研判 ({date_str})\n\n"
+        "# 今日计算机视觉与遥感交叉前沿与导师研判 ({date_str})\n\n"
         "## 1. 今日前沿速递与导师研判\n"
         "- **核心技术演进**：[从今日论文集中提炼 2-3 条最显著的技术趋势或范式变化，每条锚定论文编号]\n"
         "- **重点论文深度点评**：[精选 2-3 篇最值得关注的论文，以审稿人视角分析：(a) 创新切入点与成立条件 (b) 核心技术机制 (c) 对领域的启示与局限]\n"
@@ -361,8 +361,8 @@ def generate_stage2_ideas(
         llm = init_llm()
 
     system_prompt = (
-        "你是遥感图像智能解译与计算机视觉领域的资深学术导师兼顶会/顶刊审稿人。\n"
-        "你当前指导的课题组聚焦「{topic}」方向。你的任务：基于前沿趋势研判和今日论文，为课题组研究生设计 3 篇高质量、可落地的科研选题与完整实验方案。\n\n"
+        "你是计算机视觉与遥感交叉领域的资深学术导师兼顶会/顶刊审稿人。\n"
+        "你当前指导的课题组聚焦「计算机视觉算法在遥感中的应用（{topic}）」方向。你的任务：基于前沿趋势研判和今日论文，为课题组研究生设计 3 篇高质量、可落地的科研选题与完整实验方案，重点突出前沿算法（如VLM、智能体、生成式AI等）在遥感任务中的交叉创新应用。\n\n"
         "## 选题质量标准\n"
         "1. **创新锚定**：每个选题必须明确指出它受到今日哪篇论文（引用编号如[3]）的启发，以及在其基础上的差异化创新点。\n"
         "2. **可行性优先**：方法设计要具体到核心模块和关键公式/机制层面，不能只是概念性描述。\n"
@@ -420,7 +420,7 @@ def generate_stage2_ideas(
     ideas = parse_stage2_output(raw_text)
     return raw_text, ideas
 
-def get_unprocessed_dates(data_dir: str = DEFAULT_DATA_DIR, db_path: str = DEFAULT_DB_PATH) -> List[str]:
+def get_unprocessed_dates(data_dir: str = DEFAULT_DATA_DIR, db_path: str = DEFAULT_DB_PATH, force: bool = False) -> List[str]:
     if not os.path.exists(data_dir):
         return []
 
@@ -434,6 +434,9 @@ def get_unprocessed_dates(data_dir: str = DEFAULT_DATA_DIR, db_path: str = DEFAU
             match = date_pattern.match(f)
             if match:
                 file_dates.add(match.group(1))
+
+    if force:
+        return sorted(list(file_dates))
 
     # Query DB processed dates
     conn = connect_db(db_path)
@@ -562,12 +565,12 @@ def backfill_historical_reports(
     topic: Optional[str] = None,
     force: bool = False
 ) -> List[str]:
-    unprocessed = get_unprocessed_dates(data_dir=data_dir, db_path=db_path)
+    unprocessed = get_unprocessed_dates(data_dir=data_dir, db_path=db_path, force=force)
     if not unprocessed:
         print("所有历史数据均已处理完毕，无须补全。")
         return []
 
-    print(f"检测到 {len(unprocessed)} 个未处理历史日期，按时间升序补全: {unprocessed}")
+    print(f"检测到 {len(unprocessed)} 个历史日期，按时间升序处理: {unprocessed}")
     processed = []
     
     for date_str in unprocessed:

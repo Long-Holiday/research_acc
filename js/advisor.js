@@ -475,8 +475,8 @@ const AdvisorApp = {
         }
     },
 
-    async handleBackfill() {
-        if (!confirm('确定开始扫描并补全所有缺失的历史研报吗？系统将在后台按时间升序挨个生成。')) {
+    async handleBackfill(force = false) {
+        if (!force && !confirm('确定开始扫描并补全所有缺失的历史研报吗？系统将在后台按时间升序挨个生成。')) {
             return;
         }
 
@@ -484,11 +484,18 @@ const AdvisorApp = {
             const resp = await Auth.fetchWithAuth('/api/advisor/backfill', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ force: false })
+                body: JSON.stringify({ force: force })
             });
 
             if (resp.ok) {
-                this.showToast('⏳ 历史研报补漏任务已提交后台后台处理中...');
+                const data = await resp.json();
+                if (data.status === 'already_complete') {
+                    if (confirm('所有缺失研报已补全。是否要强制重新生成所有历史研报？（此操作耗时较长）')) {
+                        this.handleBackfill(true);
+                    }
+                } else {
+                    this.showToast('⏳ 历史研报补漏任务已提交后台处理中...');
+                }
             } else {
                 throw new Error('提交补漏任务失败');
             }
