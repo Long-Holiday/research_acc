@@ -66,19 +66,13 @@ def set_advisor_topic(topic: str, db_path: str = DEFAULT_DB_PATH) -> str:
 
 def init_llm(model_name: Optional[str] = None):
     if not model_name:
-        model_name = os.environ.get("MODEL_NAME", "deepseek-chat")
+        model_name = os.environ.get("ADVISOR_MODEL_NAME", "gemini-1.5-pro")
     
-    if model_name.lower().startswith("gemini"):
-        return ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=0.3
-        )
-    else:
-        return ChatOpenAI(
-            model=model_name,
-            temperature=0.3,
-            extra_body={"thinking": {"type": "disabled"}} if "deepseek" in model_name.lower() else None
-        )
+    return ChatGoogleGenerativeAI(
+        model=model_name,
+        temperature=0.3,
+        google_api_key=os.environ.get("GOOGLE_API_KEY")
+    )
 
 def load_raw_papers_compact(filepath: str, max_papers: int = 60) -> str:
     if not os.path.exists(filepath):
