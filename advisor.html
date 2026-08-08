@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AI Academic Advisor - 前沿分析与科研思路研报">
+    <title>AI 学术导师前沿研报 - Daily arXiv AI Enhanced</title>
+    <link rel="icon" type="image/png" href="assets/logo2-removebg-preview.png">
+    <link rel="shortcut icon" type="image/png" href="assets/logo2-removebg-preview.png">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/advisor.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- Authentication & Core Scripts -->
+    <script src="js/auth.js"></script>
+    <script>
+        Auth.requireAuth();
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header Controls -->
+        <header>
+            <div class="header-content">
+                <div class="header-left">
+                    <a href="index.html" class="back-button" title="返回首页">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M20 11H7.83L13.42 5.41L12 4L4 12L12 20L13.41 18.59L7.83 13H20V11Z" fill="currentColor"/>
+                        </svg>
+                    </a>
+                </div>
+                
+                <div class="header-center">
+                    <a href="index.html" class="site-logo">
+                        <img src="assets/logo2-removebg-preview.png" alt="Logo" class="logo-image">
+                        <span class="site-title">🎓 AI 学术导师前沿研报</span>
+                    </a>
+                </div>
+                
+                <div class="header-controls">
+                    <!-- Date Picker -->
+                    <div class="date-selector">
+                        <div class="date-display">
+                            <span id="currentDate">加载中...</span>
+                            <button id="calendarButton" class="icon-button" title="选择日期">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M19 4H18V2H16V4H8V2H6V4H5C3.89 4 3.01 4.9 3.01 6L3 20C3 21.1 3.89 22 5 22H19C20.1 22 21 21.1 21 20V6C21 4.9 20.1 4 19 4ZM19 20H5V9H19V20ZM7 11H12V16H7V11Z" fill="currentColor"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <button id="backfillBtn" class="action-btn secondary" title="按时间正序回溯生成所有缺失历史日期的研报">
+                        <span>⏳ 历史补漏</span>
+                    </button>
+                    
+                    <button id="regenerateBtn" class="action-btn primary" title="重新生成当前日期的研报">
+                        <span>🔄 重新生成</span>
+                    </button>
+
+                    <button id="logoutButton" onclick="Auth.logout()" class="icon-button" title="退出登录" style="border: none; background: transparent; cursor: pointer; color: #e74c3c; display: none;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M17 7L15.59 8.41L18.17 11H8V13H18.17L15.59 15.59L17 17L22 12L17 7ZM4 5H12V3H4C2.9 3 2 3.9 2 5V19C2 20.1 2.9 21 4 21H12V19H4V5Z" fill="currentColor"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Topic Banner -->
+        <section class="topic-banner">
+            <div class="topic-content">
+                <span class="topic-label">🎯 导师科研关注主题：</span>
+                <span id="topicValue" class="topic-text">遥感图像的处理与信息提取（目标检测、语义分割等）</span>
+                <button id="editTopicBtn" class="edit-topic-btn" title="修改科研主题">✏️ 修改主题</button>
+            </div>
+        </section>
+
+        <!-- Main Content Area -->
+        <main class="advisor-main">
+            <!-- Loading State -->
+            <div id="loadingState" class="state-container" style="display: none;">
+                <div class="spinner"></div>
+                <p id="loadingText">正在生成学术导师研报，请稍候（预计需 15-30 秒）...</p>
+            </div>
+
+            <!-- Empty State -->
+            <div id="emptyState" class="state-container" style="display: none;">
+                <div class="empty-icon">🎓</div>
+                <h3>尚无当前日期的导师研报</h3>
+                <p>点击上方“重新生成”或“历史补漏”开始 AI 研研与思路设计</p>
+                <button id="emptyGenerateBtn" class="action-btn primary" style="margin-top: 15px;">立即生成今日研报</button>
+            </div>
+
+            <!-- Report Container Cards -->
+            <div id="reportContainer" class="advisor-cards-grid" style="display: none;">
+                
+                <!-- Card 1: 今日前沿速递与导师研判 -->
+                <div class="advisor-card card-frontier">
+                    <div class="card-header">
+                        <h2>🌟 今日前沿速递与导师研判</h2>
+                        <span class="card-badge">Stage 1 研判</span>
+                    </div>
+                    <div class="card-body markdown-body" id="part1Content">
+                        <!-- Rendered Markdown -->
+                    </div>
+                </div>
+
+                <!-- Card 2: 时序演进对比 -->
+                <div class="advisor-card card-temporal">
+                    <div class="card-header">
+                        <h2>📈 时序演进对比（7天 / 30天趋势）</h2>
+                        <span class="card-badge">演进追踪</span>
+                    </div>
+                    <div class="card-body markdown-body" id="part2Content">
+                        <!-- Rendered Markdown -->
+                    </div>
+                </div>
+
+                <!-- Card 3: 3篇落地科研思路工坊 -->
+                <div class="advisor-card card-ideas card-fullwidth">
+                    <div class="card-header">
+                        <h2>💡 3篇落地科研思路与实验设计工坊</h2>
+                        <span class="card-badge highlight">Stage 2 创新设计</span>
+                    </div>
+
+                    <!-- Idea Tabs -->
+                    <div class="idea-tabs-nav">
+                        <button class="idea-tab-btn active" data-tab="0">
+                            <span>💡 思路1：顶会理论/架构创新型</span>
+                        </button>
+                        <button class="idea-tab-btn" data-tab="1">
+                            <span>🎯 思路2：高价值痛点/任务落地型</span>
+                        </button>
+                        <button class="idea-tab-btn" data-tab="2">
+                            <span>🧩 思路3：多模态/大模型跨界融合型</span>
+                        </button>
+                    </div>
+
+                    <!-- Tab Content Container -->
+                    <div class="idea-tab-contents">
+                        <!-- Tab Pane 0 -->
+                        <div class="idea-pane active" id="ideaPane0">
+                            <div class="idea-action-bar">
+                                <span class="idea-type-title" id="ideaTitle0">---</span>
+                                <button class="copy-exp-btn" onclick="AdvisorApp.copyIdeaExperiment(0)">
+                                    📋 复制本篇实验设计
+                                </button>
+                            </div>
+                            <div class="idea-details-grid" id="ideaGrid0"></div>
+                        </div>
+
+                        <!-- Tab Pane 1 -->
+                        <div class="idea-pane" id="ideaPane1">
+                            <div class="idea-action-bar">
+                                <span class="idea-type-title" id="ideaTitle1">---</span>
+                                <button class="copy-exp-btn" onclick="AdvisorApp.copyIdeaExperiment(1)">
+                                    📋 复制本篇实验设计
+                                </button>
+                            </div>
+                            <div class="idea-details-grid" id="ideaGrid1"></div>
+                        </div>
+
+                        <!-- Tab Pane 2 -->
+                        <div class="idea-pane" id="ideaPane2">
+                            <div class="idea-action-bar">
+                                <span class="idea-type-title" id="ideaTitle2">---</span>
+                                <button class="copy-exp-btn" onclick="AdvisorApp.copyIdeaExperiment(2)">
+                                    📋 复制本篇实验设计
+                                </button>
+                            </div>
+                            <div class="idea-details-grid" id="ideaGrid2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Topic Settings Modal -->
+        <div id="topicModal" class="modal-overlay" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>修改导师科研关注主题</h3>
+                    <button id="closeTopicModalBtn" class="modal-close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-desc">系统将根据您设定的科研主题，调整每日论文筛选偏好、前沿研报侧重与科研选题方向。</p>
+                    <textarea id="modalTopicInput" rows="4" placeholder="例如：遥感图像的处理与信息提取（目标检测、语义分割等）"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button id="cancelTopicModalBtn" class="action-btn secondary">取消</button>
+                    <button id="saveTopicModalBtn" class="action-btn primary">保存并生效</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notification Container -->
+        <div id="toastContainer" class="toast-container"></div>
+    </div>
+
+    <!-- Page Logic Script -->
+    <script src="js/advisor.js"></script>
+</body>
+</html>

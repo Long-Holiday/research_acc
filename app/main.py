@@ -12,6 +12,7 @@ from server_modules.processor import scan_and_process_files
 from app.auth import router as auth_router, clean_expired_sessions_loop
 from server_modules.papers import router as papers_router
 from server_modules.stats import router as stats_router
+from server_modules.advisor import router as advisor_router
 
 async def periodic_file_scan():
     while True:
@@ -65,6 +66,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(auth_router)
 app.include_router(papers_router)
 app.include_router(stats_router)
+app.include_router(advisor_router)
 
 # Serve HTML pages directly
 @app.get("/")
@@ -83,6 +85,10 @@ def read_settings():
 @app.get("/statistic.html")
 def read_statistic():
     return FileResponse("statistic.html")
+
+@app.get("/advisor.html")
+def read_advisor():
+    return FileResponse("advisor.html")
 
 # Mount static folders if they exist
 for folder in ["js", "css", "assets", "images"]:

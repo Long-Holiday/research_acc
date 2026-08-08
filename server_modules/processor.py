@@ -74,6 +74,25 @@ def scan_and_process_files():
                 PRIMARY KEY (paper_id, paper_date, language)
             )
             """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS advisor_reports (
+                report_date TEXT PRIMARY KEY,
+                topic TEXT NOT NULL,
+                summary_takeaway TEXT,
+                report_markdown TEXT NOT NULL,
+                ideas_json TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS advisor_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_advisor_reports_date ON advisor_reports (report_date)")
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ks_date_lang_cat ON keyword_stats (paper_date, language, category)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ks_keyword ON keyword_stats (keyword)")

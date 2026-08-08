@@ -31,6 +31,11 @@ def test_statistic_page():
     assert response.status_code == 200
     assert "Statistics" in response.text
 
+def test_advisor_page():
+    response = client.get("/advisor.html")
+    assert response.status_code == 200
+    assert "学术导师" in response.text or "Academic Advisor" in response.text
+
 def test_static_files():
     # Test mounting and serving of static files (e.g. css/styles.css)
     response = client.get("/css/styles.css")

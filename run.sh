@@ -142,12 +142,18 @@ if [ "$PARTIAL_MODE" = "false" ]; then
     fi
     echo "✅ AI增强处理完成 / AI enhancement processing completed"
     cd ..
-else
-    echo "⏭️  跳过AI处理（部分模式）/ Skipping AI processing (partial mode)"
-fi
 
-# Step 4 is no longer required (skipped Markdown conversion)
-# Step 5 is no longer required (skipped assets/file-list.txt generation)
+    echo "步骤4：生成学术导师前沿分析与科研思路研报（含历史补漏）... / Step 4: Generating Academic Advisor Report..."
+    python ai/advisor.py --date "${today}" --backfill
+    
+    if [ $? -ne 0 ]; then
+        echo "⚠️ 学术导师研报生成跳断或遇到警告，不影响主爬取数据"
+    else
+        echo "✅ 学术导师研报生成完成 / Academic Advisor report generated successfully"
+    fi
+else
+    echo "⏭️  跳过AI处理与导师研报生成（部分模式）/ Skipping AI processing and Advisor report (partial mode)"
+fi
 
 # 完成总结 / Completion summary
 echo ""
@@ -157,11 +163,12 @@ if [ "$PARTIAL_MODE" = "false" ]; then
     echo "   ✅ 数据爬取 / Data crawling"
     echo "   ✅ 去重检查 / Smart duplicate check"
     echo "   ✅ AI增强处理 / AI enhancement"
+    echo "   ✅ 学术导师研报生成 / Academic Advisor report generation"
 else
     echo "🔄 部分流程已完成 / Partial workflow finished:"
     echo "   ✅ 数据爬取 / Data crawling"
     echo "   ✅ 去重检查 / Smart duplicate check"
-    echo "   ⏭️  跳过AI增强 / Skipped AI enhancement"
+    echo "   ⏭️  跳过AI增强及导师研报 / Skipped AI enhancement and Advisor report"
     echo ""
     echo "💡 提示：设置 OPENAI_API_KEY 或 GOOGLE_API_KEY 可启用完整功能 / Tip: Set OPENAI_API_KEY or GOOGLE_API_KEY to enable full functionality"
 fi
