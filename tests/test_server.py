@@ -50,6 +50,11 @@ def test_auth_and_data_apis():
     old_processor_db_path = processor.DB_PATH
     server.DB_PATH = "data/test_statistics.db"
     processor.DB_PATH = "data/test_statistics.db"
+    if os.path.exists("data/test_statistics.db"):
+        try:
+            os.remove("data/test_statistics.db")
+        except Exception:
+            pass
     
     # Unauthenticated access should fail
     response = client.get("/api/dates")
@@ -81,6 +86,7 @@ def test_auth_and_data_apis():
             "title": "Test Paper", 
             "authors": ["Author 1"], 
             "categories": ["cs.CV"], 
+            "summary": "This test paper presents a novel computer vision method.",
             "AI": {
                 "translated_title": "测试论文标题",
                 "tldr": "Tldr"

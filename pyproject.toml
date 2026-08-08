@@ -22,5 +22,7 @@ dependencies = [
     "pytest>=8.0.0",
     "spacy>=3.7.0",
     "networkx>=3.6.1",
+    "tenacity>=8.2.0",
+    "json-repair>=0.62.0",
 ]
 license = "Apache-2.0"

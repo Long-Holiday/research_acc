@@ -21,7 +21,13 @@ from langchain.prompts import (
     SystemMessagePromptTemplate,
     HumanMessagePromptTemplate,
 )
-from structure import Structure
+from json_repair import repair_json
+from tenacity import retry, stop_after_attempt, wait_random_exponential
+
+try:
+    from ai.structure import Structure
+except ImportError:
+    from structure import Structure
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
@@ -41,12 +47,54 @@ def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, required=True, help="jsonline data file")
-    parser.add_argument("--max_workers", type=int, default=50, help="Maximum number of parallel workers")
+    parser.add_argument("--max_workers", type=int, default=15, help="Maximum number of parallel workers")
     return parser.parse_args()
+
+def preprocess_latex_escapes(text: str) -> str:
+    """预处理转义，将 LaTeX 命令（如 \frac, \alpha 等）补充转义为 \\frac"""
+    if not text:
+        return ""
+    return re.sub(r"\\([a-zA-Z]{2,})", r"\\\\\1", text)
+
+def repair_and_extract_json(raw_text: str) -> Dict:
+    """智能从不规范文本或异常堆栈中提取并修复 JSON 对象"""
+    if not raw_text:
+        return {}
+    processed_text = preprocess_latex_escapes(raw_text)
+    try:
+        res = repair_json(processed_text, return_objects=True)
+        if isinstance(res, dict) and res:
+            return res
+    except Exception:
+        pass
+
+    if "Function Structure arguments:" in raw_text:
+        try:
+            json_str = raw_text.split("Function Structure arguments:", 1)[1].strip()
+            if "are not valid JSON" in json_str:
+                json_str = json_str.split("are not valid JSON")[0].strip()
+            json_str = preprocess_latex_escapes(json_str)
+            res = repair_json(json_str, return_objects=True)
+            if isinstance(res, dict) and res:
+                return res
+        except Exception:
+            pass
+
+    return {}
+
+def invoke_chain_with_retry(chain, inputs: Dict) -> Structure:
+    """带指数退避和并发重试的 Chain 调用"""
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_random_exponential(min=1, max=6),
+        reraise=True
+    )
+    def _invoke():
+        return chain.invoke(inputs)
+    return _invoke()
 
 def process_single_item(chain, item: Dict, language: str) -> Dict:
     """处理单个数据项"""
-
 
     # Default structure with meaningful fallback values
     default_ai_fields = {
@@ -58,43 +106,33 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         "conclusion": "Conclusion extraction failed",
         "remote_sensing_cross": "Remote sensing cross-disciplinary scheme unavailable"
     }
-    
+
+    inputs = {
+        "language": language,
+        "content": item.get('summary', ''),
+        "title": item.get('title', '')
+    }
+
     try:
-        response: Structure = chain.invoke({
-            "language": language,
-            "content": item['summary'],
-            "title": item.get('title', '')
-        })
+        response: Structure = invoke_chain_with_retry(chain, inputs)
         item['AI'] = response.model_dump()
     except langchain_core.exceptions.OutputParserException as e:
-        # 尝试从错误信息中提取 JSON 字符串并修复
         error_msg = str(e)
-        partial_data = {}
-        
-        if "Function Structure arguments:" in error_msg:
-            try:
-                # 提取 JSON 字符串
-                json_str = error_msg.split("Function Structure arguments:", 1)[1].strip().split('are not valid JSON')[0].strip()
-                # 预处理 LaTeX 数学符号 - 使用四个反斜杠来确保正确转义
-                json_str = json_str.replace('\\', '\\\\')
-                # 尝试解析修复后的 JSON
-                partial_data = json.loads(json_str)
-            except Exception as json_e:
-                print(f"Failed to parse JSON for {item.get('id', 'unknown')}: {json_e}", file=sys.stderr)
-        
-        # Merge partial data with defaults to ensure all fields exist
+        print(f"OutputParserException for {item.get('id', 'unknown')}, trying json_repair...", file=sys.stderr)
+        partial_data = repair_and_extract_json(error_msg)
         item['AI'] = {**default_ai_fields, **partial_data}
-        print(f"Using partial AI data for {item.get('id', 'unknown')}: {list(partial_data.keys())}", file=sys.stderr)
+        print(f"Using repaired AI data for {item.get('id', 'unknown')}: {list(partial_data.keys())}", file=sys.stderr)
     except Exception as e:
-        # Catch any other exceptions and provide default values
+        error_msg = str(e)
         print(f"Unexpected error for {item.get('id', 'unknown')}: {e}", file=sys.stderr)
-        item['AI'] = default_ai_fields
-    
+        partial_data = repair_and_extract_json(error_msg)
+        item['AI'] = {**default_ai_fields, **partial_data}
+
     # Final validation to ensure all required fields exist
     for field in default_ai_fields.keys():
-        if field not in item['AI']:
-            item['AI'][field] = default_ai_fields[field]
-
+        if field not in item['AI'] or not item['AI'][field]:
+            if field not in item['AI']:
+                item['AI'][field] = default_ai_fields[field]
 
     return item
 

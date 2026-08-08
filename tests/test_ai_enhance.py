@@ -56,13 +56,19 @@ def test_validate_remote_sensing_cross_fallback():
     res = Structure.validate_remote_sensing_cross("这是一个完全没有百分比的改进方案内容。")
     assert res == "交叉/改进可行性：70%。这是一个完全没有百分比的改进方案内容。"
 
-from ai.enhance import process_single_item
+from ai.enhance import process_single_item, repair_and_extract_json
+import langchain_core.exceptions
 
 class MockChain:
-    def __init__(self, should_fail=False):
+    def __init__(self, should_fail=False, raise_parser_error=False):
         self.should_fail = should_fail
+        self.raise_parser_error = raise_parser_error
         
     def invoke(self, inputs):
+        if self.raise_parser_error:
+            raise langchain_core.exceptions.OutputParserException(
+                r'Function Structure arguments: {"translated_title": "修复标题", "tldr": "公式 \alpha + \beta 成功提取", "motivation": "动机", "method": "方法", "result": "结果", "conclusion": "结论", "remote_sensing_cross": "交叉/改进可行性：85%。具体方案"} are not valid JSON'
+            )
         if self.should_fail:
             raise Exception("Mock invocation failure")
         # Return mock structure
@@ -95,5 +101,23 @@ def test_process_single_item_fallback():
     res = process_single_item(chain, item, "Chinese")
     assert "AI" in res
     assert res["AI"]["translated_title"] == ""
+    assert res["AI"]["tldr"] == "Summary generation failed"
+
+def test_process_single_item_parser_error_repaired():
+    chain = MockChain(raise_parser_error=True)
+    item = {
+        "title": "LaTeX Test",
+        "summary": "LaTeX summary"
+    }
+    res = process_single_item(chain, item, "Chinese")
+    assert "AI" in res
+    assert res["AI"]["translated_title"] == "修复标题"
+    assert "alpha" in res["AI"]["tldr"]
+
+def test_repair_and_extract_json():
+    bad_str = r'{"translated_title": "标题", "tldr": "含有 \frac{1}{2} 公式", "motivation": "动机", "method": "方法", "result": "结果", "conclusion": "结论", "remote_sensing_cross": "交叉/改进可行性：90%。方案"}'
+    parsed = repair_and_extract_json(bad_str)
+    assert parsed["translated_title"] == "标题"
+    assert "frac" in parsed["tldr"]
 
 
