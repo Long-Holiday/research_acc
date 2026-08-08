@@ -907,6 +907,145 @@ function updateExcludeKeywords() {
   loadAndRenderNetwork(categoryParam);
 }
 
+async function aiFilterKeywords() {
+  const btn = document.getElementById('aiFilterKeywordsBtn');
+  const textSpan = document.getElementById('aiFilterKeywordsText');
+  const notice = document.getElementById('aiFilterStatusNotice');
+  
+  if (!currentKeywordsData || currentKeywordsData.length === 0) {
+    if (notice) {
+      notice.className = 'ai-filter-notice info';
+      notice.innerHTML = '<span>当前没有可供分析的关键词数据 / No keywords to analyze.</span>';
+      notice.style.display = 'flex';
+      setTimeout(() => { if (notice) notice.style.display = 'none'; }, 4000);
+    }
+    return;
+  }
+
+  // 提取当前前 120 个热门关键词
+  const candidateKeywords = currentKeywordsData.slice(0, 120).map(k => k.keyword);
+  const categoryParam = selectedCategories.includes('All') ? 'All' : selectedCategories.join(',');
+
+  // UI 切换为加载状态
+  if (btn) btn.disabled = true;
+  if (textSpan) textSpan.innerHTML = '<span class="ai-spinner-small"></span> AI 分析中...';
+  if (notice) {
+    notice.className = 'ai-filter-notice info';
+    notice.innerHTML = '<span><span class="ai-spinner-small" style="margin-right:6px;vertical-align:middle;border-color:rgba(30,64,175,0.3);border-top-color:#1e40af;"></span>正在使用大模型智能识别并过滤无学术意义的泛化关键词...</span>';
+    notice.style.display = 'flex';
+  }
+
+  try {
+    const response = await Auth.fetchWithAuth('/api/stats/keywords/ai-filter', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        keywords: candidateKeywords,
+        category: categoryParam
+      })
+    });
+
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => ({}));
+      throw new Error(errJson.detail || `请求失败 (${response.status})`);
+    }
+
+    const data = await response.json();
+    const newExcluded = data.excluded_keywords || [];
+
+    // 获取当前已排除列表并合并
+    const currentEx = new Set(getExcludedKeywords());
+    let newlyAddedCount = 0;
+
+    newExcluded.forEach(kw => {
+      if (!currentEx.has(kw)) {
+        currentEx.add(kw);
+        newlyAddedCount++;
+      }
+    });
+
+    const updatedExList = Array.from(currentEx);
+    localStorage.setItem('excludedKeywords', JSON.stringify(updatedExList));
+
+    // 更新 Choices.js 控件
+    if (window.excludeChoices) {
+      const existingChoices = window.excludeChoices._currentState?.choices?.map(c => c.value) || [];
+      const existingSet = new Set(existingChoices);
+      const toAddChoices = [];
+      
+      updatedExList.forEach(kw => {
+        if (!existingSet.has(kw)) {
+          toAddChoices.push({ value: kw, label: kw });
+        }
+      });
+      
+      if (toAddChoices.length > 0) {
+        window.excludeChoices.setChoices(toAddChoices, 'value', 'label', false);
+      }
+      
+      window.excludeChoices.removeActiveItems();
+      if (updatedExList.length > 0) {
+        window.excludeChoices.setChoiceByValue(updatedExList);
+      }
+    }
+
+    // 触发图表与网络图重新渲染
+    if (window.updateCharts) {
+      window.updateCharts();
+    }
+    loadAndRenderNetwork(categoryParam);
+
+    if (notice) {
+      notice.className = 'ai-filter-notice success';
+      if (newlyAddedCount > 0) {
+        notice.innerHTML = `<span>✨ AI 智能过滤完成：识别出 <strong>${newExcluded.length}</strong> 个无意义泛化词，已自动加入排除列表并更新图表（新增排除 <strong>${newlyAddedCount}</strong> 个，共排除 ${updatedExList.length} 个）。</span><button type="button" onclick="this.parentElement.style.display='none'" style="background:none;border:none;cursor:pointer;color:inherit;font-size:14px;padding:0 4px;margin-left:8px;">✕</button>`;
+      } else {
+        notice.innerHTML = `<span>✨ AI 智能过滤完成：当前关键词质量良好，未发现需新增排除的无意义词。</span><button type="button" onclick="this.parentElement.style.display='none'" style="background:none;border:none;cursor:pointer;color:inherit;font-size:14px;padding:0 4px;margin-left:8px;">✕</button>`;
+      }
+      notice.style.display = 'flex';
+      setTimeout(() => {
+        if (notice) notice.style.display = 'none';
+      }, 7000);
+    }
+
+  } catch (error) {
+    console.error('AI 关键词过滤失败:', error);
+    if (notice) {
+      notice.className = 'ai-filter-notice error';
+      notice.innerHTML = `<span>❌ AI 过滤失败: ${escapeHtml(error.message)}</span><button type="button" onclick="this.parentElement.style.display='none'" style="background:none;border:none;cursor:pointer;color:inherit;font-size:14px;padding:0 4px;margin-left:8px;">✕</button>`;
+      notice.style.display = 'flex';
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+    if (textSpan) textSpan.textContent = 'AI 智能过滤';
+  }
+}
+
+function clearExcludeKeywords() {
+  localStorage.setItem('excludedKeywords', '[]');
+  if (window.excludeChoices) {
+    window.excludeChoices.removeActiveItems();
+  }
+  const notice = document.getElementById('aiFilterStatusNotice');
+  if (notice) {
+    notice.className = 'ai-filter-notice info';
+    notice.innerHTML = '<span>已清空所有已排除的关键词 / All keyword exclusions cleared.</span>';
+    notice.style.display = 'flex';
+    setTimeout(() => { if (notice) notice.style.display = 'none'; }, 3000);
+  }
+  if (window.updateCharts) {
+    window.updateCharts();
+  }
+  const categoryParam = selectedCategories.includes('All') ? 'All' : selectedCategories.join(',');
+  loadAndRenderNetwork(categoryParam);
+}
+
+window.aiFilterKeywords = aiFilterKeywords;
+window.clearExcludeKeywords = clearExcludeKeywords;
+
+
 window.updateTrendChart = function() {
   const trendChartCard = document.getElementById('trendChartCard');
   if (!trendChartCard || !window.currentDailyTrends || !currentKeywordsData) return;

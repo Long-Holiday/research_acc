@@ -2,11 +2,14 @@ import os
 import re
 import json
 from datetime import datetime, timedelta
+from typing import List, Optional
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
 from app.auth import verify_token
 from server_modules.database import connect_db
 from server_modules.processor import scan_and_process_files
 from server_modules.analytics import community_detection
+from ai.keyword_filter import filter_meaningless_keywords
 import app.config as config
 
 router = APIRouter()
@@ -480,3 +483,31 @@ def get_hot_papers(journal: str, period: int, token: str = Depends(verify_token)
         raise HTTPException(status_code=500, detail=f"Failed to fetch hot papers: {str(e)}")
     finally:
         conn.close()
+
+
+class AIKeywordFilterRequest(BaseModel):
+    keywords: List[str] = Field(default_factory=list, description="List of candidate keywords to filter")
+    category: str = Field("All", description="Paper category context")
+    model_name: Optional[str] = Field(None, description="Optional LLM model name")
+
+
+@router.post("/api/stats/keywords/ai-filter")
+def ai_filter_keywords(
+    request: AIKeywordFilterRequest,
+    token: str = Depends(verify_token)
+):
+    try:
+        excluded = filter_meaningless_keywords(
+            keywords=request.keywords,
+            category=request.category,
+            model_name=request.model_name
+        )
+        return {
+            "status": "success",
+            "excluded_keywords": excluded,
+            "total_checked": len(request.keywords),
+            "excluded_count": len(excluded)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI Keyword Filtering failed: {str(e)}")
+

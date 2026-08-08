@@ -161,12 +161,30 @@
                         <div class="statistics-card" style="padding: 24px;">
                             <!-- 排除关键词过滤组件 -->
                             <div class="exclude-section-container" style="margin-bottom: 24px;">
-                                <div class="exclude-subtitle" style="font-size: 13.5px; font-weight: 600; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: #94a3b8;">
-                                        <path d="M3 4C3 3.44772 3.44772 3 4 3H20C20.5523 3 21 3.44772 21 4V6.58579C21 6.851 20.8946 7.10536 20.7071 7.29289L14.2929 13.7071C14.1054 13.8946 14 14.149 14 14.4142V19.5528C14 19.8809 13.6393 20.0767 13.3618 19.9033L10.3618 18.0283C10.136 17.8872 10 17.6391 10 17.3739V14.4142C10 14.149 9.89464 13.8946 9.70711 13.7071L3.29289 7.29289C3.10536 7.10536 3 6.851 3 6.58579V4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                    Select keywords to exclude
+                                <div class="exclude-header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+                                    <div class="exclude-subtitle" style="font-size: 13.5px; font-weight: 600; color: #64748b; display: flex; align-items: center; gap: 6px;">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: #94a3b8;">
+                                            <path d="M3 4C3 3.44772 3.44772 3 4 3H20C20.5523 3 21 3.44772 21 4V6.58579C21 6.851 20.8946 7.10536 20.7071 7.29289L14.2929 13.7071C14.1054 13.8946 14 14.149 14 14.4142V19.5528C14 19.8809 13.6393 20.0767 13.3618 19.9033L10.3618 18.0283C10.136 17.8872 10 17.6391 10 17.3739V14.4142C10 14.149 9.89464 13.8946 9.70711 13.7071L3.29289 7.29289C3.10536 7.10536 3 6.851 3 6.58579V4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                        Select keywords to exclude
+                                    </div>
+                                    <div class="exclude-btn-group" style="display: flex; align-items: center; gap: 8px;">
+                                        <button id="aiFilterKeywordsBtn" class="ai-filter-keywords-btn" type="button" onclick="aiFilterKeywords()" title="使用大模型智能识别并排除无学术意义的泛化关键词">
+                                            <svg class="ai-btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z" fill="currentColor"/>
+                                                <path d="M18.5 16L19.7 18.8L22.5 20L19.7 21.2L18.5 24L17.3 21.2L14.5 20L17.3 18.8L18.5 16Z" fill="currentColor"/>
+                                            </svg>
+                                            <span id="aiFilterKeywordsText">AI 智能过滤</span>
+                                        </button>
+                                        <button id="clearExcludeKeywordsBtn" class="clear-exclude-keywords-btn" type="button" onclick="clearExcludeKeywords()" title="清空所有已排除的关键词">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                            清空排除
+                                        </button>
+                                    </div>
                                 </div>
+                                <div id="aiFilterStatusNotice" class="ai-filter-notice" style="display: none;"></div>
                                 <div class="global-exclude-wrapper">
                                     <div class="exclude-input-container">
                                         <select id="excludeKeywordsSelect" multiple="multiple" style="display: none;" onchange="updateExcludeKeywords()">

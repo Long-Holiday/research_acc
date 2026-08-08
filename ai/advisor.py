@@ -8,6 +8,11 @@ import argparse
 from typing import List, Dict, Tuple, Optional
 import dotenv
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 import langchain_core.exceptions
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -18,8 +23,6 @@ from langchain.prompts import (
 )
 from server_modules.database import connect_db
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(current_dir)
 if os.path.exists(os.path.join(root_dir, '.env')):
     dotenv.load_dotenv(os.path.join(root_dir, '.env'))
 elif os.path.exists('.env'):
