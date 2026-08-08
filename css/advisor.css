@@ -54,19 +54,13 @@
 }
 
 .advisor-cards-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 24px;
 }
 
 .card-fullwidth {
-    grid-column: 1 / -1;
-}
-
-@media (max-width: 900px) {
-    .advisor-cards-grid {
-        grid-template-columns: 1fr;
-    }
+    width: 100%;
 }
 
 /* Cards */
@@ -300,27 +294,256 @@
 .markdown-body {
     color: #cbd5e0;
     font-size: 0.95rem;
-    line-height: 1.7;
+    line-height: 1.75;
 }
 
-.markdown-body h1, .markdown-body h2, .markdown-body h3 {
-    color: #f1f5f9;
-    margin-top: 1.2em;
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+    color: #f8fafc;
+    font-weight: 700;
+    margin-top: 1.4em;
     margin-bottom: 0.6em;
+    letter-spacing: -0.01em;
 }
 
-.markdown-body ul {
-    padding-left: 20px;
+.markdown-body h1 { font-size: 1.4rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 8px; }
+.markdown-body h2 { font-size: 1.25rem; }
+.markdown-body h3 { font-size: 1.1rem; color: #93c5fd; }
+.markdown-body h4 { font-size: 1.0rem; color: #e2e8f0; }
+
+.markdown-body p {
     margin-bottom: 1em;
 }
 
+.markdown-body ul, .markdown-body ol {
+    padding-left: 24px;
+    margin-bottom: 1.2em;
+}
+
 .markdown-body li {
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 
 .markdown-body strong {
     color: #93c5fd;
+    font-weight: 600;
 }
+
+.markdown-body hr {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin: 24px 0;
+}
+
+.markdown-body blockquote {
+    margin: 16px 0;
+    padding: 12px 18px;
+    background: rgba(30, 41, 59, 0.5);
+    border-left: 4px solid #3b82f6;
+    border-radius: 0 8px 8px 0;
+    color: #94a3b8;
+}
+
+/* Tables in Markdown */
+.markdown-body table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 20px 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(15, 23, 42, 0.5);
+}
+
+.markdown-body th {
+    background: rgba(30, 41, 59, 0.85);
+    color: #93c5fd;
+    padding: 12px 16px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.markdown-body td {
+    padding: 11px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    color: #e2e8f0;
+    font-size: 0.88rem;
+}
+
+.markdown-body tr:last-child td {
+    border-bottom: none;
+}
+
+.markdown-body tr:hover td {
+    background: rgba(59, 130, 246, 0.05);
+}
+
+/* Inline and Block Code */
+.markdown-body code:not(pre code) {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+    background: rgba(59, 130, 246, 0.12);
+    color: #60a5fa;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.88em;
+}
+
+.markdown-body pre {
+    background: #0f172a;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 16px;
+    overflow-x: auto;
+    margin: 16px 0;
+}
+
+.markdown-body pre code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SFMono-Regular', Consolas, 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: #e2e8f0;
+}
+
+/* KaTeX Mathematical Formulas */
+.katex-block-wrapper {
+    margin: 16px 0;
+    padding: 14px 20px;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(99, 179, 237, 0.25);
+    border-radius: 10px;
+    overflow-x: auto;
+    text-align: center;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.katex-inline-wrapper {
+    display: inline-block;
+    padding: 0 4px;
+    color: #93c5fd;
+}
+
+.katex-display {
+    margin: 0 !important;
+}
+
+.katex {
+    font-size: 1.05em !important;
+    text-rendering: auto;
+}
+
+/* Architecture Framework Blueprint Card (ASCII/Diagram Container) */
+.architecture-diagram-container {
+    margin: 20px 0;
+    background: linear-gradient(160deg, #090d16 0%, #0d1527 50%, #0a1120 100%);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 15px rgba(56, 189, 248, 0.1);
+}
+
+.diagram-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 16px;
+    background: rgba(15, 23, 42, 0.85);
+    border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.diagram-badge {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.diagram-copy-btn {
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    color: #bae6fd;
+    padding: 4px 10px;
+    font-size: 0.76rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.diagram-copy-btn:hover {
+    background: rgba(56, 189, 248, 0.25);
+    color: #ffffff;
+    border-color: #38bdf8;
+}
+
+.diagram-copy-btn.copied {
+    background: rgba(34, 197, 94, 0.2);
+    border-color: #22c55e;
+    color: #86efac;
+}
+
+.diagram-code-wrapper {
+    padding: 16px 20px;
+    overflow-x: auto;
+    background: transparent;
+}
+
+.diagram-code-wrapper pre {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+}
+
+.diagram-code-wrapper code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SFMono-Regular', Consolas, 'Courier New', monospace;
+    font-size: 0.84rem;
+    line-height: 1.25;
+    letter-spacing: 0;
+    font-feature-settings: "liga" 0;
+    color: #38bdf8;
+    display: block;
+    white-space: pre;
+}
+
+/* Mermaid Chart Card */
+.mermaid-chart-card {
+    margin: 20px 0;
+    background: #0f172a;
+    border: 1px solid rgba(99, 179, 237, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.mermaid-header {
+    padding: 10px 16px;
+    background: rgba(30, 41, 59, 0.8);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #60a5fa;
+}
+
+.mermaid-body {
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #090d16;
+    overflow-x: auto;
+}
+
+.mermaid-body svg {
+    max-width: 100% !important;
+    height: auto !important;
+}
+
 
 /* Modal Styling */
 .modal-overlay {
@@ -419,4 +642,114 @@
 @keyframes toastOut {
     from { opacity: 1; transform: translateY(0); }
     to { opacity: 0; transform: translateY(-20px); }
+}
+
+/* Date Display Interactive Control */
+.date-display {
+    cursor: pointer;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.date-display:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(99, 179, 237, 0.5);
+}
+
+/* Popover Flatpickr Styling for Advisor Page */
+body .flatpickr-calendar:not(.inline) {
+    background: #1e293b !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5) !important;
+    border-radius: 12px !important;
+    padding: 12px !important;
+    width: 310px !important;
+    color: #f8fafc !important;
+    z-index: 9999 !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-months {
+    background: transparent !important;
+    align-items: center;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-month {
+    color: #f8fafc !important;
+    fill: #f8fafc !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-current-month {
+    color: #f8fafc !important;
+    font-weight: 600 !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-current-month .flatpickr-monthDropdown-months {
+    color: #f8fafc !important;
+    background: #0f172a !important;
+}
+
+body .flatpickr-calendar:not(.inline) .numInputWrapper span {
+    border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-prev-month,
+body .flatpickr-calendar:not(.inline) .flatpickr-next-month {
+    color: #63b3ed !important;
+    fill: #63b3ed !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-prev-month:hover svg,
+body .flatpickr-calendar:not(.inline) .flatpickr-next-month:hover svg {
+    fill: #90cdf4 !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-weekday {
+    color: #a0aec0 !important;
+    font-weight: 600 !important;
+}
+
+body .flatpickr-calendar:not(.inline) .dayContainer {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-day {
+    color: #e2e8f0 !important;
+    border-radius: 8px !important;
+    border: none !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-day:hover {
+    background: rgba(99, 179, 237, 0.2) !important;
+    color: #63b3ed !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-day.today {
+    border: 1px solid #63b3ed !important;
+    color: #63b3ed !important;
+    background: transparent !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-day.selected {
+    background: #3182ce !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 12px rgba(49, 130, 206, 0.4) !important;
+}
+
+body .flatpickr-calendar:not(.inline) .flatpickr-day.flatpickr-disabled,
+body .flatpickr-calendar:not(.inline) .flatpickr-day.flatpickr-disabled:hover,
+body .flatpickr-calendar:not(.inline) .flatpickr-day.prevMonthDay,
+body .flatpickr-calendar:not(.inline) .flatpickr-day.nextMonthDay {
+    color: rgba(255, 255, 255, 0.2) !important;
+    background: transparent !important;
+}
+
+body .flatpickr-calendar:not(.inline):before,
+body .flatpickr-calendar:not(.inline):after {
+    border-bottom-color: #1e293b !important;
 }

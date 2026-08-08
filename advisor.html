@@ -14,6 +14,14 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
+    <!-- KaTeX for Math Equations Rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- Mermaid for Flowcharts & Architecture Diagrams Rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+
     <!-- Authentication & Core Scripts -->
     <script src="js/auth.js"></script>
     <script>
@@ -121,60 +129,14 @@
                     </div>
                 </div>
 
-                <!-- Card 3: 3篇落地科研思路工坊 -->
-                <div class="advisor-card card-ideas card-fullwidth">
+                <!-- Card 3: 3篇梯队化科研选题与实验设计方案 -->
+                <div class="advisor-card card-ideas">
                     <div class="card-header">
-                        <h2>💡 3篇落地科研思路与实验设计工坊</h2>
-                        <span class="card-badge highlight">Stage 2 创新设计</span>
+                        <h2>💡 3篇梯队化科研选题与实验设计方案</h2>
+                        <span class="card-badge highlight">梯队化选题</span>
                     </div>
-
-                    <!-- Idea Tabs -->
-                    <div class="idea-tabs-nav">
-                        <button class="idea-tab-btn active" data-tab="0">
-                            <span>💡 思路1：顶会理论/架构创新型</span>
-                        </button>
-                        <button class="idea-tab-btn" data-tab="1">
-                            <span>🎯 思路2：高价值痛点/任务落地型</span>
-                        </button>
-                        <button class="idea-tab-btn" data-tab="2">
-                            <span>🧩 思路3：多模态/大模型跨界融合型</span>
-                        </button>
-                    </div>
-
-                    <!-- Tab Content Container -->
-                    <div class="idea-tab-contents">
-                        <!-- Tab Pane 0 -->
-                        <div class="idea-pane active" id="ideaPane0">
-                            <div class="idea-action-bar">
-                                <span class="idea-type-title" id="ideaTitle0">---</span>
-                                <button class="copy-exp-btn" onclick="AdvisorApp.copyIdeaExperiment(0)">
-                                    📋 复制本篇实验设计
-                                </button>
-                            </div>
-                            <div class="idea-details-grid" id="ideaGrid0"></div>
-                        </div>
-
-                        <!-- Tab Pane 1 -->
-                        <div class="idea-pane" id="ideaPane1">
-                            <div class="idea-action-bar">
-                                <span class="idea-type-title" id="ideaTitle1">---</span>
-                                <button class="copy-exp-btn" onclick="AdvisorApp.copyIdeaExperiment(1)">
-                                    📋 复制本篇实验设计
-                                </button>
-                            </div>
-                            <div class="idea-details-grid" id="ideaGrid1"></div>
-                        </div>
-
-                        <!-- Tab Pane 2 -->
-                        <div class="idea-pane" id="ideaPane2">
-                            <div class="idea-action-bar">
-                                <span class="idea-type-title" id="ideaTitle2">---</span>
-                                <button class="copy-exp-btn" onclick="AdvisorApp.copyIdeaExperiment(2)">
-                                    📋 复制本篇实验设计
-                                </button>
-                            </div>
-                            <div class="idea-details-grid" id="ideaGrid2"></div>
-                        </div>
+                    <div class="card-body markdown-body" id="part3Content">
+                        <!-- Rendered Markdown -->
                     </div>
                 </div>
             </div>

@@ -119,7 +119,7 @@ def test_parse_stage1_output():
 
 def test_parse_stage2_output_structured():
     stage2_text = """
-## 3. 3篇落地科研思路与实验设计
+## 3. 3篇梯队化科研选题与实验设计方案
 
 ### 思路1【顶会理论/架构创新型】
 - **【选题名称】**: 基于物理先验引导的遥感跨尺度旋转目标检测网络 (Physics-Guided Cross-Scale Oriented Detector)

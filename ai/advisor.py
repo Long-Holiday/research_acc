@@ -112,16 +112,37 @@ def load_raw_papers_compact(filepath: str, max_papers: int = 60) -> str:
         title = p.get("title", "").strip()
         authors = ", ".join(p.get("authors", [])[:3])
         cats = ", ".join(p.get("categories", [])[:3]) if isinstance(p.get("categories"), list) else str(p.get("categories", ""))
-        summary = p.get("summary", "").strip().replace("\n", " ")
-        # Truncate summary to ~300 chars
-        if len(summary) > 350:
-            summary = summary[:350] + "..."
-            
-        formatted_list.append(
-            f"[{i}] Title: {title}\n"
-            f"    Authors: {authors} | Categories: {cats}\n"
-            f"    Abstract: {summary}"
-        )
+        
+        # Prefer AI-enhanced fields for higher information density
+        ai_info = p.get("AI", {})
+        
+        # Use AI.tldr if available (more concise than raw abstract)
+        tldr = (ai_info.get("tldr") or "").strip()
+        if not tldr:
+            summary = p.get("summary", "").strip().replace("\n", " ")
+            if len(summary) > 350:
+                summary = summary[:350] + "..."
+            tldr = summary
+        
+        # Build structured info from AI fields
+        motivation = (ai_info.get("motivation") or "").strip()
+        method = (ai_info.get("method") or "").strip()
+        cross_potential = (ai_info.get("remote_sensing_cross") or "").strip()
+        translated_title = (ai_info.get("translated_title") or "").strip()
+        
+        entry = f"[{i}] Title: {title}"
+        if translated_title:
+            entry += f" ({translated_title})"
+        entry += f"\n    Authors: {authors} | Categories: {cats}"
+        entry += f"\n    TLDR: {tldr}"
+        if motivation:
+            entry += f"\n    Motivation: {motivation}"
+        if method:
+            entry += f"\n    Method: {method}"
+        if cross_potential:
+            entry += f"\n    CrossPotential: {cross_potential}"
+        
+        formatted_list.append(entry)
         
     return "\n\n".join(formatted_list)
 
@@ -181,57 +202,56 @@ def parse_stage1_output(text: str) -> Tuple[str, str]:
 
     return part1_2, takeaway
 
+def _extract_field(block: str, field_name: str) -> str:
+    """Extract a field value from a block with flexible pattern matching."""
+    # Try multiple common formatting variants the LLM might produce
+    patterns = [
+        rf"-\s*\*\*【{field_name}】\*\*[:：]\s*(.*)",        # - **【X】**: val
+        rf"-\s*\*\*【{field_name}】\*\*\s+(.*)",             # - **【X】** val (missing colon)
+        rf"\*\*【{field_name}】\*\*[:：]\s*(.*)",             # **【X】**: val (no leading dash)
+        rf"-\s*【{field_name}】[:：]\s*(.*)",                  # - 【X】: val (no bold)
+        rf"【{field_name}】[:：]\s*(.*)",                       # 【X】: val
+    ]
+    for pat in patterns:
+        match = re.search(pat, block)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
 def parse_stage2_output(text: str) -> List[Dict]:
     ideas = []
-    # Split by ### 思路 or ### Idea
-    blocks = re.split(r"###\s*(?:思路|Idea)", text)
+    # Split by ### 思路 or ### Idea (flexible whitespace and numbering)
+    blocks = re.split(r"###\s*(?:思路|Idea)\s*", text)
     
     for block in blocks[1:]:
         lines = block.strip().split("\n")
         header = lines[0] if lines else ""
         
+        # Determine idea type from header content
         idea_type = "顶会理论/架构创新型"
-        if "落地" in header or "2" in header:
+        header_lower = header.lower()
+        if any(kw in header_lower for kw in ["落地", "痛点", "应用", "任务"]):
             idea_type = "高价值痛点/任务落地型"
-        elif "多模态" in header or "大模型" in header or "3" in header:
+        elif any(kw in header_lower for kw in ["多模态", "大模型", "跨界", "融合", "multimodal", "llm", "foundation"]):
+            idea_type = "多模态/大模型跨界融合型"
+        elif "2" in header[:5]:  # Fallback: check position number
+            idea_type = "高价值痛点/任务落地型"
+        elif "3" in header[:5]:
             idea_type = "多模态/大模型跨界融合型"
             
-        title = ""
-        motivation = ""
-        method = ""
-        datasets = ""
-        experiments = ""
-        defense = ""
-
         full_block = "\n" + block
-        
-        title_match = re.search(r"-\s*\*\*【选题名称】\*\*[:：]\s*(.*)", full_block)
-        if title_match:
-            title = title_match.group(1).strip()
 
-        motivation_match = re.search(r"-\s*\*\*【研究痛点与动机】\*\*[:：]\s*(.*)", full_block)
-        if motivation_match:
-            motivation = motivation_match.group(1).strip()
-
-        method_match = re.search(r"-\s*\*\*【核心方法设计】\*\*[:：]\s*(.*)", full_block)
-        if method_match:
-            method = method_match.group(1).strip()
-
-        datasets_match = re.search(r"-\s*\*\*【推荐公开数据集与Baseline】\*\*[:：]\s*(.*)", full_block)
-        if datasets_match:
-            datasets = datasets_match.group(1).strip()
-
-        exp_match = re.search(r"-\s*\*\*【实验验证与消融方案】\*\*[:：]\s*(.*)", full_block)
-        if exp_match:
-            experiments = exp_match.group(1).strip()
-
-        def_match = re.search(r"-\s*\*\*【审稿人潜在质疑点与防守策略】\*\*[:：]\s*(.*)", full_block)
-        if def_match:
-            defense = def_match.group(1).strip()
+        title = _extract_field(full_block, "选题名称")
+        motivation = _extract_field(full_block, "研究痛点与动机")
+        method = _extract_field(full_block, "核心方法设计")
+        datasets = _extract_field(full_block, "推荐公开数据集与Baseline")
+        experiments = _extract_field(full_block, "实验验证与消融方案")
+        defense = _extract_field(full_block, "审稿人潜在质疑点与防守策略")
 
         ideas.append({
             "type": idea_type,
-            "title": title or header,
+            "title": title or header.strip(),
             "motivation": motivation,
             "method": method,
             "datasets": datasets,
@@ -253,30 +273,49 @@ def generate_stage1_trend_analysis(
     if llm is None:
         llm = init_llm()
 
+    has_week = week_context and "暂无" not in week_context
+    has_month = month_context and "暂无" not in month_context
+
     system_prompt = (
-        "你是一位遥感图像智能解译（Remote Sensing Image Interpretation）与计算机视觉领域的资深学术导师、博导兼顶会审稿人（CVPR/ICCV/ECCV/TGRS）。\n"
-        "你的主要职责是分析研究论文，研判最新技术演进与时序趋势。\n"
-        "请严格只根据传入的原始论文摘要信息和历史研报上下文进行逻辑推演与评价，切勿依赖词频统计或外部假设。\n"
-        "你的语言风格应当专业、严谨、敏锐且富有启发性。"
+        "你是遥感图像智能解译（Remote Sensing Image Interpretation）与计算机视觉领域的资深学术导师（博导）、顶会/顶刊审稿人（CVPR/ICCV/ECCV/TGRS/ISPRS）。\n"
+        "你当前指导的课题组聚焦于「{topic}」方向，兼具深厚的理论洞察力和敏锐的技术趋势判断力。\n\n"
+        "## 工作准则\n"
+        "1. **证据驱动**：所有观点必须锚定到传入论文集中具体论文的编号（如[3]、[17]），不得凭空臆断。\n"
+        "2. **深度优先**：点评论文时，聚焦其核心创新机制和方法论突破，而非复述摘要。分析切入角度应当是审稿人视角——指出创新点的成立条件与潜在局限。\n"
+        "3. **时序连贯**：若提供了历史研报上下文，需与之对比发现演进趋势、范式转移或同质化信号。若无历史数据则如实说明，绝不虚构。\n"
+        "4. **语言风格**：专业、严谨、敏锐且有启发性。多用判断句，少用描述句。"
+    )
+
+    # Build temporal analysis instructions dynamically based on data availability
+    temporal_7d_instruction = (
+        "[对比过去7天研报，识别哪些技术方向在升温、哪些在同质化/红海化，并锚定到具体论文编号]"
+        if has_week else
+        "[直接书写'暂无过去7天历史数据，不作趋势对比。']"
+    )
+    temporal_30d_instruction = (
+        "[结合近30天宏观脉络，判断哪些创新范式最具顶会/顶刊录用潜力，审稿人最常拒稿的缺陷模式是什么]"
+        if has_month else
+        "[直接书写'暂无过去30天历史数据，不作趋势对比。']"
     )
 
     human_prompt = (
-        "【导师科研主题】: {topic}\n"
-        "【研判目标日期】: {date_str}\n\n"
-        "【过去 7 天研报历史摘要上下文】:\n{week_context}\n\n"
-        "【过去 30 天宏观脉络上下文】:\n{month_context}\n\n"
-        "【今日原始论文紧凑集】:\n{papers_text}\n\n"
-        "--- 请产出 Part 1 和 Part 2 研判内容，格式要求如下 ---\n"
+        "【科研主题】: {topic}\n"
+        "【目标日期】: {date_str}\n\n"
+        "【过去 7 天研报摘要】:\n{week_context}\n\n"
+        "【过去 30 天宏观脉络】:\n{month_context}\n\n"
+        "【今日论文集（含AI结构化增强信息）】:\n{papers_text}\n\n"
+        "---\n"
+        "请按以下格式输出研判报告，每个要点都必须引用具体论文编号：\n\n"
         "# 今日遥感智能解译前沿与学术导师研判 ({date_str})\n\n"
         "## 1. 今日前沿速递与导师研判\n"
-        "- **核心技术演进**：[研判今日技术突破与主要范式]\n"
-        "- **重点论文深度点评**：[挑选 2-3 篇最值得关注的论文点评，分析切入点、创新机制与领域启示]\n"
-        "- **跨领域交叉启发**：[通用 CV/NLP/大模型领域的哪些新范式可迁移至遥感任务中]\n\n"
-        "## 2. 时序演进对比（7天/30天趋势）\n"
-        "- **7天技术演变观察**：[对比过去7天，哪些方向升温，哪些方向趋于同质化/红海]\n"
-        "- **30天宏观脉络与顶会审稿偏好**：[近1个月最具录用潜力的创新范式与审稿人最反感的缺陷]\n\n"
+        "- **核心技术演进**：[从今日论文集中提炼 2-3 条最显著的技术趋势或范式变化，每条锚定论文编号]\n"
+        "- **重点论文深度点评**：[精选 2-3 篇最值得关注的论文，以审稿人视角分析：(a) 创新切入点与成立条件 (b) 核心技术机制 (c) 对领域的启示与局限]\n"
+        "- **跨领域交叉启发**：[今日论文中哪些通用CV/NLP/大模型的新范式可迁移至遥感「{topic}」任务中，指出具体迁移路径与适配要点]\n\n"
+        "## 2. 时序演进对比（7天 / 30天趋势）\n"
+        "- **7天技术演变观察**：" + temporal_7d_instruction + "\n"
+        "- **30天宏观脉络与审稿偏好**：" + temporal_30d_instruction + "\n\n"
         "## 核心精炼摘要\n"
-        "[此处给出 150-200 字的精炼摘要，用于后续系统沉淀与时序对比]"
+        "[150-200 字精炼摘要：概括今日最重要的 2-3 个发现，用于后续日期的时序对比输入。格式为纯文本段落，不含 Markdown 标记]"
     )
 
     prompt = ChatPromptTemplate.from_messages([
@@ -296,6 +335,21 @@ def generate_stage1_trend_analysis(
     raw_text = res.content if hasattr(res, "content") else str(res)
     return parse_stage1_output(raw_text)
 
+def _truncate_papers_by_count(papers_text: str, max_chars: int = 12000) -> str:
+    """Truncate papers text by complete paper entries instead of hard character cut."""
+    if len(papers_text) <= max_chars:
+        return papers_text
+    papers = papers_text.split("\n\n")
+    result = []
+    total = 0
+    for p in papers:
+        if total + len(p) > max_chars:
+            break
+        result.append(p)
+        total += len(p) + 2  # +2 for "\n\n"
+    return "\n\n".join(result)
+
+
 def generate_stage2_ideas(
     date_str: str,
     topic: str,
@@ -307,39 +361,44 @@ def generate_stage2_ideas(
         llm = init_llm()
 
     system_prompt = (
-        "你是一位遥感图像智能解译与计算机视觉领域的资深学术导师兼顶会资深审稿人。\n"
-        "你的任务是基于第一阶段的前沿趋势研判与今日论文，为课题组研究生设计 3 篇高质量、高可行性、论证严密的落地科研选题与实验方案。\n"
-        "选题必须具备明确的创新切入点、可防守的方法架构设计、公认的 Benchmark 对齐方案及审稿人质疑预演。"
+        "你是遥感图像智能解译与计算机视觉领域的资深学术导师兼顶会/顶刊审稿人。\n"
+        "你当前指导的课题组聚焦「{topic}」方向。你的任务：基于前沿趋势研判和今日论文，为课题组研究生设计 3 篇高质量、可落地的科研选题与完整实验方案。\n\n"
+        "## 选题质量标准\n"
+        "1. **创新锚定**：每个选题必须明确指出它受到今日哪篇论文（引用编号如[3]）的启发，以及在其基础上的差异化创新点。\n"
+        "2. **可行性优先**：方法设计要具体到核心模块和关键公式/机制层面，不能只是概念性描述。\n"
+        "3. **防守意识**：每个选题都要预演审稿人最可能的 2-3 个质疑，并给出有说服力的防守策略。\n"
+        "4. **梯队互补**：3个选题应覆盖不同的创新维度（理论深度、应用价值、跨界融合），形成梯队互补。"
     )
 
     human_prompt = (
-        "【导师科研主题】: {topic}\n"
-        "【研判目标日期】: {date_str}\n\n"
+        "【科研主题】: {topic}\n"
+        "【目标日期】: {date_str}\n\n"
         "【Stage 1 前沿研判成果】:\n{stage1_analysis}\n\n"
-        "【今日代表性论文】:\n{papers_text}\n\n"
-        "--- 请构思并输出 3 篇梯队化科研选题与实验设计方案 ---\n\n"
-        "## 3. 3篇落地科研思路与实验设计\n\n"
+        "【今日论文集】:\n{papers_text}\n\n"
+        "---\n"
+        "请构思 3 篇梯队化科研选题。严格按以下格式输出，不要修改标记符号：\n\n"
+        "## 3. 3篇梯队化科研选题与实验设计方案\n\n"
         "### 思路1【顶会理论/架构创新型】\n"
-        "- **【选题名称】**: 中英文题目\n"
-        "- **【研究痛点与动机】**: 现有方案瓶颈与核心洞察\n"
-        "- **【核心方法设计】**: 网络架构设计构想、关键模块、核心机制/公式设计\n"
-        "- **【推荐公开数据集与Baseline】**: 明确评测数据集与典型对比 Baseline 方法\n"
-        "- **【实验验证与消融方案】**: 核心对比实验指标、关键消融实验设定\n"
-        "- **【审稿人潜在质疑点与防守策略】**: 预判审稿人可能指出的软肋及防守方案\n\n"
+        "- **【选题名称】**：中英文题目\n"
+        "- **【研究痛点与动机】**：该方向当前的核心瓶颈是什么，受到今日哪篇论文[编号]的启发\n"
+        "- **【核心方法设计】**：具体的网络架构/算法设计、关键模块命名与功能、核心机制或公式描述\n"
+        "- **【推荐公开数据集与Baseline】**：具体的评测数据集名称及对比Baseline方法\n"
+        "- **【实验验证与消融方案】**：主实验指标、关键消融实验设定（逐模块消融）\n"
+        "- **【审稿人潜在质疑点与防守策略】**：2-3个预判质疑及对应防守方案\n\n"
         "### 思路2【高价值痛点/任务落地型】\n"
-        "- **【选题名称】**: 中英文题目\n"
-        "- **【研究痛点与动机】**: 复杂场景下的具体应用瓶颈\n"
-        "- **【核心方法设计】**: 针对性解耦、轻量化、弱监督或先验引导方案\n"
-        "- **【推荐公开数据集与Baseline】**: 评测数据集与强基线\n"
-        "- **【实验验证与消融方案】**: 验证方案与关键消融\n"
-        "- **【审稿人潜在质疑点与防守策略】**: 潜在质疑与应对方案\n\n"
+        "- **【选题名称】**：中英文题目\n"
+        "- **【研究痛点与动机】**：实际应用场景中的具体瓶颈，受哪篇论文[编号]启发\n"
+        "- **【核心方法设计】**：针对性的轻量化/解耦/弱监督/先验引导方案设计\n"
+        "- **【推荐公开数据集与Baseline】**：评测数据集与强基线方法\n"
+        "- **【实验验证与消融方案】**：验证方案与关键消融设定\n"
+        "- **【审稿人潜在质疑点与防守策略】**：2-3个预判质疑与应对方案\n\n"
         "### 思路3【多模态/大模型跨界融合型】\n"
-        "- **【选题名称】**: 中英文题目\n"
-        "- **【研究痛点与动机】**: 遥感多模态大模型、视觉-语言对齐或图文交互难点\n"
-        "- **【核心方法设计】**: 适配遥感特性的跨模态融合机制或指令微调框架\n"
-        "- **【推荐公开数据集与Baseline】**: 多模态基准数据集与主流多模态基线\n"
-        "- **【实验验证与消融方案】**: 零样本/少样本泛化与消融实验\n"
-        "- **【审稿人潜在质疑点与防守策略】**: 针对泛化性/计算代价的质疑与防守"
+        "- **【选题名称】**：中英文题目\n"
+        "- **【研究痛点与动机】**：跨模态/大模型在该领域的具体难点，受哪篇论文[编号]启发\n"
+        "- **【核心方法设计】**：跨模态融合机制或大模型适配/微调框架的具体设计\n"
+        "- **【推荐公开数据集与Baseline】**：多模态基准数据集与主流基线\n"
+        "- **【实验验证与消融方案】**：泛化性验证与消融实验\n"
+        "- **【审稿人潜在质疑点与防守策略】**：2-3个预判质疑与防守策略"
     )
 
     prompt = ChatPromptTemplate.from_messages([
@@ -348,11 +407,13 @@ def generate_stage2_ideas(
     ])
 
     chain = prompt | llm
+    # Truncate by complete paper entries instead of hard character cut
+    truncated_papers = _truncate_papers_by_count(papers_text, max_chars=12000)
     res = chain.invoke({
         "topic": topic,
         "date_str": date_str,
         "stage1_analysis": stage1_analysis,
-        "papers_text": papers_text[:8000]
+        "papers_text": truncated_papers
     })
 
     raw_text = res.content if hasattr(res, "content") else str(res)

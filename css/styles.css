@@ -932,8 +932,9 @@ main {
   display: none;
 }
 
-/* Make flatpickr calendar take full width */
-.flatpickr-calendar {
+/* Make flatpickr calendar take full width when inline */
+.flatpickr-calendar.inline,
+.flatpickr-container .flatpickr-calendar {
   width: 100% !important;
   max-width: 100% !important;
   padding: 0 !important;
