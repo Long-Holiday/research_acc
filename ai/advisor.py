@@ -16,6 +16,7 @@ if root_dir not in sys.path:
 
 import langchain_core.exceptions
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import (
     ChatPromptTemplate,
     SystemMessagePromptTemplate,
@@ -175,13 +176,34 @@ def set_advisor_topic(topic: str, db_path: str = DEFAULT_DB_PATH) -> str:
 
 def init_llm(model_name: Optional[str] = None):
     if not model_name:
-        model_name = os.environ.get("MODEL_NAME")
-    
-    return ChatOpenAI(
-        model=model_name,
-        temperature=0.3,
-        openai_api_key=os.environ.get("OPENAI_API_KEY")
-    )
+        # Keep the site-wide model as the primary setting while supporting
+        # the advisor-specific setting used by older deployments.
+        model_name = (
+            os.environ.get("MODEL_NAME")
+            or os.environ.get("ADVISOR_MODEL_NAME")
+            or "deepseek-chat"
+        )
+    model_name = model_name.strip()
+    model_lower = model_name.lower()
+
+    if model_lower.startswith("gemini"):
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            temperature=0.3,
+            google_api_key=os.environ.get("GOOGLE_API_KEY"),
+        )
+
+    openai_kwargs = {
+        "model": model_name,
+        "temperature": 0.3,
+        "openai_api_key": os.environ.get("OPENAI_API_KEY"),
+    }
+    # Advisor reports require DeepSeek's reasoning mode for multi-stage
+    # analysis. The HTTP endpoint runs this work in the background.
+    if "deepseek" in model_lower:
+        openai_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+
+    return ChatOpenAI(**openai_kwargs)
 
 def load_raw_papers_compact(filepath: str, max_papers: int = 60) -> str:
     if not os.path.exists(filepath):

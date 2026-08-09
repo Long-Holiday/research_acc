@@ -483,13 +483,14 @@ const AdvisorApp = {
     },
 
     async handleGenerate(force = false) {
-        this.showState('loading', '正在调用 AI 学术导师引擎研判与构思（约需 15-30 秒）...');
+        this.showState('loading', '正在提交 AI 学术导师研报生成任务...');
         try {
+            const dateStr = this.currentDate;
             const resp = await Auth.fetchWithAuth('/api/advisor/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    date: this.currentDate,
+                    date: dateStr,
                     force: force
                 })
             });
@@ -500,6 +501,10 @@ const AdvisorApp = {
             }
 
             const data = parsed.data;
+            if (data && data.status === 'processing') {
+                await this.waitForGeneration(dateStr);
+                return;
+            }
             if (!data || typeof data !== 'object' || !data.report) {
                 throw new Error(this.responseError(resp, parsed));
             }
@@ -513,6 +518,39 @@ const AdvisorApp = {
             alert(`生成导师研报失败: ${e.message}`);
             this.showState('empty');
         }
+    },
+
+    async waitForGeneration(dateStr) {
+        const maxAttempts = 300;
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            const resp = await Auth.fetchWithAuth(
+                `/api/advisor/generate/status?date=${encodeURIComponent(dateStr)}`
+            );
+            const parsed = await this.readResponse(resp);
+            if (!resp.ok) {
+                throw new Error(this.responseError(resp, parsed));
+            }
+
+            const data = parsed.data || {};
+            if (data.status === 'success') {
+                await this.loadReportForDate(dateStr);
+                this.showToast('✅ 导师研报生成成功！');
+                await this.loadAvailableDates();
+                return;
+            }
+            if (data.status === 'failed') {
+                throw new Error(data.error || '导师研报生成失败');
+            }
+
+            this.showState(
+                'loading',
+                `后台正在生成导师研报，请稍候（${Math.floor((attempt + 1) * 2 / 60)} 分钟）...`
+            );
+        }
+
+        throw new Error('研报生成时间过长，请稍后刷新页面查看结果');
     },
 
     async handleBackfill(force = false) {

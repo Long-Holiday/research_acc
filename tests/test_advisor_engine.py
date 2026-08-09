@@ -80,6 +80,18 @@ def test_load_raw_papers_compact(tmp_path):
     assert "Paper Title 4" in papers_text
     assert "remote sensing object detection" in papers_text
 
+
+def test_init_llm_enables_deepseek_thinking(monkeypatch):
+    monkeypatch.setenv("MODEL_NAME", "deepseek-chat")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with patch("ai.advisor.ChatOpenAI") as chat_openai:
+        from ai.advisor import init_llm
+
+        init_llm()
+
+    kwargs = chat_openai.call_args.kwargs
+    assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+
 def test_fetch_temporal_context_fallback():
     week_context, month_context = fetch_temporal_context("2026-08-08", db_path=TEST_DB)
     assert "暂无过去7天" in week_context

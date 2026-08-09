@@ -2,6 +2,7 @@ import os
 import json
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 from server import app
 import server
 import server_modules.processor as processor
@@ -83,3 +84,30 @@ def test_advisor_settings_get_and_post():
     # Re-fetch
     resp = client.get("/api/advisor/settings", headers=headers)
     assert resp.json()["topic"] == new_topic
+
+
+def test_force_generation_is_queued():
+    headers = get_auth_header()
+    report = {
+        "report_date": "2026-08-08",
+        "topic": "Remote Sensing",
+        "summary_takeaway": "摘要",
+        "report_markdown": "# 报告",
+        "ideas_json": [],
+        "cached": False,
+    }
+    with patch("server_modules.advisor.generate_advisor_report", return_value=report):
+        resp = client.post(
+            "/api/advisor/generate",
+            json={"date": "2026-08-08", "force": True},
+            headers=headers,
+        )
+
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "processing"
+    status = client.get(
+        "/api/advisor/generate/status?date=2026-08-08",
+        headers=headers,
+    )
+    assert status.status_code == 200
+    assert status.json()["status"] == "success"
