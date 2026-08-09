@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from server import app
 import server
 import server_modules.processor as processor
+from server_modules.database import connect_db
 
 client = TestClient(app)
 TEST_DB_PATH = "data/test_advisor_api.db"
@@ -48,6 +49,24 @@ def test_advisor_report_not_found():
     headers = get_auth_header()
     resp = client.get("/api/advisor/report?date=2026-08-08", headers=headers)
     assert resp.status_code == 404
+
+
+def test_advisor_report_repairs_malformed_ideas_json():
+    conn = connect_db(TEST_DB_PATH)
+    conn.execute(
+        """
+        INSERT INTO advisor_reports
+            (report_date, topic, summary_takeaway, report_markdown, ideas_json)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        ("2026-08-08", "Remote Sensing", "摘要", "# 报告", '[{"title":"历史方案"}')
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/api/advisor/report?date=2026-08-08", headers=get_auth_header())
+    assert resp.status_code == 200
+    assert resp.json()["ideas_json"][0]["title"] == "历史方案"
 
 def test_advisor_settings_get_and_post():
     headers = get_auth_header()

@@ -1,5 +1,4 @@
 import os
-import json
 import re
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -13,7 +12,8 @@ from ai.advisor import (
     set_advisor_topic,
     generate_advisor_report,
     backfill_historical_reports,
-    get_unprocessed_dates
+    get_unprocessed_dates,
+    parse_ideas_json,
 )
 
 router = APIRouter()
@@ -72,7 +72,7 @@ def get_advisor_report(date: str, token: str = Depends(verify_token)):
         if not row:
             raise HTTPException(status_code=404, detail=f"No advisor report found for date {date}")
 
-        ideas = json.loads(row[4]) if row[4] else []
+        ideas = parse_ideas_json(row[4])
         return {
             "report_date": row[0],
             "topic": row[1],

@@ -8,6 +8,35 @@ const AdvisorApp = {
     currentReport: null,
     flatpickrInstance: null,
 
+    async readResponse(resp) {
+        const text = await resp.text();
+        if (!text.trim()) {
+            return { data: null, text: '' };
+        }
+
+        try {
+            return { data: JSON.parse(text), text };
+        } catch (e) {
+            return { data: null, text };
+        }
+    },
+
+    responseError(resp, parsed) {
+        if (parsed && parsed.data && typeof parsed.data === 'object') {
+            const detail = parsed.data.detail || parsed.data.message || parsed.data.error;
+            if (detail) return String(detail);
+        }
+
+        const body = parsed && parsed.text ? parsed.text.trim() : '';
+        if (body && !/^</.test(body)) {
+            return body.slice(0, 240);
+        }
+        if (!body) {
+            return `服务器返回空响应（HTTP ${resp.status || '未知'}）`;
+        }
+        return `服务器返回了非 JSON 响应（HTTP ${resp.status || '未知'}）`;
+    },
+
     async init() {
         this.bindEvents();
         await this.loadSettings();
@@ -39,8 +68,8 @@ const AdvisorApp = {
         try {
             const resp = await Auth.fetchWithAuth('/api/advisor/settings');
             if (resp.ok) {
-                const data = await resp.json();
-                if (data.topic) {
+                const { data } = await this.readResponse(resp);
+                if (data && data.topic) {
                     document.getElementById('topicValue').textContent = data.topic;
                 }
             }
@@ -53,8 +82,8 @@ const AdvisorApp = {
         try {
             const resp = await Auth.fetchWithAuth('/api/advisor/dates');
             if (resp.ok) {
-                const data = await resp.json();
-                this.availableDates = data.dates || [];
+                const { data } = await this.readResponse(resp);
+                this.availableDates = data && Array.isArray(data.dates) ? data.dates : [];
             }
         } catch (e) {
             console.error('Failed to load dates:', e);
@@ -109,7 +138,10 @@ const AdvisorApp = {
                 throw new Error('网络请求失败');
             }
 
-            const report = await resp.json();
+            const { data: report } = await this.readResponse(resp);
+            if (!report || typeof report !== 'object') {
+                throw new Error(this.responseError(resp, { data: null, text: '' }));
+            }
             this.currentReport = report;
             this.renderReport(report);
             this.showState('report');
@@ -120,6 +152,7 @@ const AdvisorApp = {
     },
 
     renderReport(report) {
+        report = report && typeof report === 'object' ? report : {};
         const fullMd = report.report_markdown || '';
         
         let part1 = '';
@@ -170,10 +203,11 @@ const AdvisorApp = {
         if (el1) el1.innerHTML = this.renderMarkdown(part1);
         if (el2) el2.innerHTML = this.renderMarkdown(part2);
         
-        if (report.ideas_json && report.ideas_json.length > 0) {
+        const ideas = Array.isArray(report.ideas_json) ? report.ideas_json : [];
+        if (ideas.length > 0) {
             if (el3) {
-                el3.innerHTML = this.renderIdeasTabs(report.ideas_json);
-                this.bindIdeaTabsAndCopy(el3, report.ideas_json);
+                el3.innerHTML = this.renderIdeasTabs(ideas);
+                this.bindIdeaTabsAndCopy(el3, ideas);
             }
         } else {
             if (el3) el3.innerHTML = this.renderMarkdown(part3);
@@ -187,19 +221,21 @@ const AdvisorApp = {
         let panesHtml = '<div class="idea-panes-container">';
 
         ideas.forEach((idea, index) => {
+            idea = idea && typeof idea === 'object' ? idea : {};
+            const ideaType = typeof idea.type === 'string' ? idea.type : '';
             const isActive = index === 0 ? 'active' : '';
             // Short title for tab
             let shortType = "思路";
-            if (idea.type.includes("理论") || idea.type.includes("架构")) shortType = "理论/架构创新";
-            else if (idea.type.includes("落地") || idea.type.includes("痛点")) shortType = "高价值落地";
-            else if (idea.type.includes("跨界") || idea.type.includes("模态")) shortType = "跨界融合";
+            if (ideaType.includes("理论") || ideaType.includes("架构")) shortType = "理论/架构创新";
+            else if (ideaType.includes("落地") || ideaType.includes("痛点")) shortType = "高价值落地";
+            else if (ideaType.includes("跨界") || ideaType.includes("模态")) shortType = "跨界融合";
             
             navHtml += `<button class="idea-tab-btn ${isActive}" data-target="idea-pane-${index}">思路 ${index + 1}: ${shortType}</button>`;
 
             panesHtml += `
             <div id="idea-pane-${index}" class="idea-pane ${isActive}">
                 <div class="idea-action-bar">
-                    <span class="idea-type-title">${idea.type || '科研选题'}</span>
+                    <span class="idea-type-title">${ideaType || '科研选题'}</span>
                     <button class="copy-exp-btn" data-idx="${index}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 4px;">
                             <path d="M16 1H4C2.9 1 2 1.9 2 3V17H4V3H16V1ZM19 5H8C6.9 5 6 5.9 6 7V21C6 22.1 6.9 23 8 23H19C20.1 23 21 22.1 21 21V7C21 5.9 20.1 5 19 5ZM19 21H8V7H19V21Z" fill="currentColor"/>
@@ -287,6 +323,7 @@ const AdvisorApp = {
 
     renderMarkdown(text) {
         if (!text) return '';
+        if (typeof text !== 'string') text = String(text);
         if (typeof marked === 'undefined') return text;
 
         const mathBlocks = [];
@@ -457,12 +494,15 @@ const AdvisorApp = {
                 })
             });
 
+            const parsed = await this.readResponse(resp);
             if (!resp.ok) {
-                const err = await resp.json();
-                throw new Error(err.detail || '生成失败');
+                throw new Error(this.responseError(resp, parsed));
             }
 
-            const data = await resp.json();
+            const data = parsed.data;
+            if (!data || typeof data !== 'object' || !data.report) {
+                throw new Error(this.responseError(resp, parsed));
+            }
             this.currentReport = data.report;
             this.renderReport(data.report);
             this.showState('report');
@@ -488,7 +528,10 @@ const AdvisorApp = {
             });
 
             if (resp.ok) {
-                const data = await resp.json();
+                const { data } = await this.readResponse(resp);
+                if (!data || typeof data !== 'object') {
+                    throw new Error(this.responseError(resp, { data: null, text: '' }));
+                }
                 if (data.status === 'already_complete') {
                     if (confirm('所有缺失研报已补全。是否要强制重新生成所有历史研报？（此操作耗时较长）')) {
                         this.handleBackfill(true);
@@ -544,7 +587,10 @@ const AdvisorApp = {
             });
 
             if (resp.ok) {
-                const data = await resp.json();
+                const { data } = await this.readResponse(resp);
+                if (!data || typeof data !== 'object' || !data.topic) {
+                    throw new Error(this.responseError(resp, { data: null, text: '' }));
+                }
                 document.getElementById('topicValue').textContent = data.topic;
                 this.closeTopicModal();
                 this.showToast('🎯 导师科研关注主题已成功更新！');

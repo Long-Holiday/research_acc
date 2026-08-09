@@ -8,6 +8,8 @@ from ai.advisor import (
     fetch_temporal_context,
     parse_stage1_output,
     parse_stage2_output,
+    parse_ideas_json,
+    repair_and_extract_json,
     get_unprocessed_dates,
     generate_advisor_report,
     DEFAULT_TOPIC
@@ -151,6 +153,32 @@ def test_parse_stage2_output_structured():
     assert "Physics-Guided" in ideas[0]["title"]
     assert ideas[1]["type"] == "高价值痛点/任务落地型"
     assert ideas[2]["type"] == "多模态/大模型跨界融合型"
+
+
+def test_repair_and_parse_json_report_output():
+    repaired = repair_and_extract_json("```json\n{'summary_takeaway': '摘要', 'items': [1, 2]\n```")
+    assert repaired["summary_takeaway"] == "摘要"
+    assert repaired["items"] == [1, 2]
+
+    stage1_json = json.dumps({
+        "report_markdown": "## 1. 前沿研判\n今日发现。\n\n## 2. 趋势对比\n趋势升温。",
+        "summary_takeaway": "今日摘要"
+    }, ensure_ascii=False)
+    part1_2, takeaway = parse_stage1_output(stage1_json)
+    assert "## 1. 前沿研判" in part1_2
+    assert takeaway == "今日摘要"
+
+    stage2_json = "{'ideas': [{'title': '结构化方案', 'method': '核心方法'}]"
+    ideas = parse_stage2_output(stage2_json)
+    assert len(ideas) == 1
+    assert ideas[0]["title"] == "结构化方案"
+    assert ideas[0]["method"] == "核心方法"
+
+
+def test_parse_ideas_json_repairs_legacy_value():
+    ideas = parse_ideas_json('[{"title": "历史方案", "defense": "防守策略"}')
+    assert len(ideas) == 1
+    assert ideas[0]["title"] == "历史方案"
 
 def test_get_unprocessed_dates(tmp_path):
     # Create mock data files
