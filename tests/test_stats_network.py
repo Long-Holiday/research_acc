@@ -1,5 +1,6 @@
 import sqlite3
 
+import server
 import server_modules.stats as stats_module
 from server_modules.stats import _filter_network_links
 
@@ -78,6 +79,7 @@ def test_network_stats_keeps_cooccurrence_inside_the_requested_scope(tmp_path, m
     )
     conn.commit()
     conn.close()
+    monkeypatch.setattr(server, "DB_PATH", str(db_path), raising=False)
     monkeypatch.setattr(stats_module.config, "DB_PATH", str(db_path))
 
     result = stats_module.get_network_stats(
