@@ -2158,6 +2158,7 @@ function renderNetwork(dataOrPapers) {
     const container = document.getElementById('networkContainer');
     if (!container) return;
     container.innerHTML = '';
+    container.style.position = 'relative';
     
     let nodes, links;
     if (dataOrPapers && dataOrPapers.nodes && dataOrPapers.links) {
@@ -2170,9 +2171,20 @@ function renderNetwork(dataOrPapers) {
     }
     
     if (!nodes || nodes.length === 0) {
-        container.innerHTML = '<div style="padding:20px;text-align:center;">No sufficient keyword data found.</div>';
+        container.innerHTML = '<div class="no-data" style="padding:20px;text-align:center;">No sufficient keyword data found.</div>';
         return;
     }
+
+    if (!links || links.length === 0) {
+        container.innerHTML = '<div class="no-data" style="padding:20px;text-align:center;">No strong keyword relationships found.</div>';
+        return;
+    }
+
+    const summary = document.createElement('div');
+    summary.className = 'network-summary';
+    summary.textContent = `${nodes.length} keywords · ${links.length} strong relationships`;
+    summary.style.cssText = 'position:absolute;top:8px;left:12px;z-index:2;font-size:12px;color:var(--text-secondary,#64748b);pointer-events:none;';
+    container.appendChild(summary);
 
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 500;
@@ -2211,6 +2223,9 @@ function renderNetwork(dataOrPapers) {
     const linkWidthScale = d3.scaleSqrt()
         .domain([d3.min(links, d => d.value) || 1, d3.max(links, d => d.value) || 5])
         .range([1, 8]);
+    const linkOpacityScale = d3.scaleLinear()
+        .domain([d3.min(links, d => d.value) || 1, d3.max(links, d => d.value) || 5])
+        .range([0.22, 0.78]);
 
     // Force simulation
     const simulation = d3.forceSimulation(nodes)
@@ -2226,7 +2241,8 @@ function renderNetwork(dataOrPapers) {
         .data(links)
         .enter().append("line")
         .attr("class", "network-link")
-        .attr("stroke-width", d => linkWidthScale(d.value));
+        .attr("stroke-width", d => linkWidthScale(d.value))
+        .attr("stroke-opacity", d => linkOpacityScale(d.value));
 
     // Nodes
     const node = g.append("g")
@@ -2257,7 +2273,7 @@ function renderNetwork(dataOrPapers) {
     node.on("mouseover", (event, d) => {
         // Dim others
         node.style("opacity", o => isConnected(d, o) ? 1 : 0.1);
-        link.style("stroke-opacity", o => (o.source === d || o.target === d ? 1 : 0.1));
+        link.style("stroke-opacity", o => isIncident(o, d) ? 1 : 0.08);
         label.style("opacity", o => isConnected(d, o) ? 1 : 0.1);
         
         tooltip.transition().duration(200).style("opacity", 1);
@@ -2266,7 +2282,7 @@ function renderNetwork(dataOrPapers) {
             .style("top", (event.pageY - 28) + "px");
     }).on("mouseout", () => {
         node.style("opacity", 1);
-        link.style("stroke-opacity", 0.8);
+        link.style("stroke-opacity", o => linkOpacityScale(o.value));
         label.style("opacity", 1);
         tooltip.transition().duration(500).style("opacity", 0);
     }).on("click", (event, d) => {
@@ -2277,12 +2293,21 @@ function renderNetwork(dataOrPapers) {
     });
 
     const linkedByIndex = {};
+    const getEndpointId = endpoint => typeof endpoint === 'object' ? endpoint.id : endpoint;
     links.forEach(d => {
-        linkedByIndex[`${d.source.id || d.source},${d.target.id || d.target}`] = 1;
+        const sourceId = getEndpointId(d.source);
+        const targetId = getEndpointId(d.target);
+        linkedByIndex[`${sourceId},${targetId}`] = 1;
+        linkedByIndex[`${targetId},${sourceId}`] = 1;
     });
 
     function isConnected(a, b) {
-        return linkedByIndex[`${a.id},${b.id}`] || linkedByIndex[`${b.id},${a.id}`] || a.id === b.id;
+        return linkedByIndex[`${a.id},${b.id}`] || a.id === b.id;
+    }
+
+    function isIncident(linkData, nodeData) {
+        return getEndpointId(linkData.source) === nodeData.id ||
+            getEndpointId(linkData.target) === nodeData.id;
     }
 
     simulation.on("tick", () => {
