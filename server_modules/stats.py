@@ -14,6 +14,44 @@ import app.config as config
 
 router = APIRouter()
 
+
+def _filter_network_links(links, min_value=2, max_links=180, max_degree=12):
+    """Keep deterministic strong links while limiting visual network density."""
+    candidates = []
+    for link in links:
+        source = str(link.get("source", ""))
+        target = str(link.get("target", ""))
+        value = float(link.get("value", 0))
+        if source and target and source != target and value >= min_value:
+            candidates.append({"source": source, "target": target, "value": value})
+
+    candidates.sort(key=lambda link: (
+        -link["value"], link["source"], link["target"]
+    ))
+
+    degree = {}
+    filtered = []
+    for link in candidates:
+        source_degree = degree.get(link["source"], 0)
+        target_degree = degree.get(link["target"], 0)
+        if source_degree >= max_degree or target_degree >= max_degree:
+            continue
+        filtered.append(link)
+        degree[link["source"]] = source_degree + 1
+        degree[link["target"]] = target_degree + 1
+        if len(filtered) >= max_links:
+            break
+
+    return [
+        {
+            "source": link["source"],
+            "target": link["target"],
+            "value": int(link["value"]) if link["value"].is_integer() else link["value"],
+        }
+        for link in filtered
+    ]
+
+
 # Helper to fetch journals Safely
 try:
     from daily_paper.daily_journals.constants import JOURNALS
@@ -321,7 +359,12 @@ def get_network_stats(
                 sql = f"""
                 SELECT pk1.keyword AS source, pk2.keyword AS target, COUNT(*) AS value
                 FROM paper_keywords pk1
-                JOIN paper_keywords pk2 ON pk1.paper_id = pk2.paper_id AND pk1.keyword < pk2.keyword
+                JOIN paper_keywords pk2
+                  ON pk1.paper_id = pk2.paper_id
+                 AND pk1.paper_date = pk2.paper_date
+                 AND pk1.language = pk2.language
+                 AND pk1.category = pk2.category
+                 AND pk1.keyword < pk2.keyword
                 WHERE pk1.paper_date BETWEEN ? AND ?
                   AND pk1.language = ?
                   AND pk1.keyword IN ({kw_placeholders})
@@ -333,7 +376,12 @@ def get_network_stats(
                 sql = f"""
                 SELECT pk1.keyword AS source, pk2.keyword AS target, COUNT(*) AS value
                 FROM paper_keywords pk1
-                JOIN paper_keywords pk2 ON pk1.paper_id = pk2.paper_id AND pk1.keyword < pk2.keyword
+                JOIN paper_keywords pk2
+                  ON pk1.paper_id = pk2.paper_id
+                 AND pk1.paper_date = pk2.paper_date
+                 AND pk1.language = pk2.language
+                 AND pk1.category = pk2.category
+                 AND pk1.keyword < pk2.keyword
                 WHERE pk1.paper_date BETWEEN ? AND ?
                   AND pk1.language = ?
                   AND pk1.category IN ({placeholders})
@@ -345,7 +393,14 @@ def get_network_stats(
                 
             cursor.execute(sql, links_params)
             links_rows = cursor.fetchall()
-            links = [{"source": row[0], "target": row[1], "value": row[2]} for row in links_rows]
+            links = _filter_network_links([
+                {"source": row[0], "target": row[1], "value": row[2]}
+                for row in links_rows
+            ])
+            linked_node_ids = {endpoint for link in links for endpoint in (
+                link["source"], link["target"]
+            )}
+            nodes = [node for node in nodes if node["id"] in linked_node_ids]
             
         # Perform community detection on nodes and links
         try:
@@ -483,4 +538,3 @@ def ai_filter_keywords(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI Keyword Filtering failed: {str(e)}")
-
