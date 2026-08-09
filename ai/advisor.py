@@ -15,7 +15,6 @@ if root_dir not in sys.path:
 
 import langchain_core.exceptions
 from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import (
     ChatPromptTemplate,
     SystemMessagePromptTemplate,
@@ -66,12 +65,12 @@ def set_advisor_topic(topic: str, db_path: str = DEFAULT_DB_PATH) -> str:
 
 def init_llm(model_name: Optional[str] = None):
     if not model_name:
-        model_name = os.environ.get("ADVISOR_MODEL_NAME", "gemini-1.5-pro")
+        model_name = os.environ.get("MODEL_NAME")
     
-    return ChatGoogleGenerativeAI(
+    return ChatOpenAI(
         model=model_name,
         temperature=0.3,
-        google_api_key=os.environ.get("GOOGLE_API_KEY")
+        openai_api_key=os.environ.get("OPENAI_API_KEY")
     )
 
 def load_raw_papers_compact(filepath: str, max_papers: int = 60) -> str:
