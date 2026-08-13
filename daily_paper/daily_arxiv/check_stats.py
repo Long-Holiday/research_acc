@@ -44,6 +44,34 @@ def load_papers_data(file_path):
         print(f"Error reading {file_path}: {e}", file=sys.stderr)
         return [], set()
 
+def load_paper_ids(file_path):
+    """
+    只提取 jsonl 文件中的论文 ID 集合，不保留完整 JSON 数据。
+    用于历史多日去重对比，避免将大量历史文件全文加载进内存。
+
+    Load only the paper ID set from a jsonl file without keeping full JSON.
+    """
+    ids = set()
+    if not os.path.exists(file_path):
+        return ids
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                except Exception:
+                    continue
+                pid = data.get('id', '')
+                if pid:
+                    ids.add(pid)
+        return ids
+    except Exception as e:
+        print(f"Error reading {file_path}: {e}", file=sys.stderr)
+        return set()
+
+
 def save_papers_data(papers, file_path):
     """
     保存论文数据到jsonl文件
@@ -99,12 +127,12 @@ def perform_deduplication(target_date=None):
         if not today_papers:
             return "no_data"
 
-        # 收集历史多日 ID 集合
+        # 收集历史多日 ID 集合（只读取 ID，避免把历史全文加载进内存）
         history_ids = set()
         for i in range(1, history_days + 1):
             date_str = (target_date_obj - timedelta(days=i)).strftime("%Y-%m-%d")
             history_file = f"../data/{date_str}.jsonl"
-            _, past_ids = load_papers_data(history_file)
+            past_ids = load_paper_ids(history_file)
             history_ids.update(past_ids)
 
         print(f"历史{history_days}日去重库大小: {len(history_ids)} / History {history_days} days deduplication library size: {len(history_ids)}", file=sys.stderr)

@@ -209,7 +209,11 @@ def load_raw_papers_compact(filepath: str, max_papers: int = 60) -> str:
     if not os.path.exists(filepath):
         return ""
     
-    papers = []
+    # 流式读取 + 边读边去重边格式化，达到 max_papers 即停止，
+    # 避免把整个数据文件（含全部论文 JSON）一次性读入内存。
+    seen_ids = set()
+    formatted_list = []
+    
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line_str = line.strip()
@@ -217,58 +221,53 @@ def load_raw_papers_compact(filepath: str, max_papers: int = 60) -> str:
                 continue
             try:
                 item = json.loads(line_str)
-                papers.append(item)
             except Exception:
                 continue
 
-    # Deduplicate
-    seen_ids = set()
-    unique_papers = []
-    for p in papers:
-        pid = p.get("id") or p.get("title")
-        if pid and pid not in seen_ids:
+            pid = item.get("id") or item.get("title")
+            if not pid or pid in seen_ids:
+                continue
             seen_ids.add(pid)
-            unique_papers.append(p)
 
-    unique_papers = unique_papers[:max_papers]
-    
-    formatted_list = []
-    for i, p in enumerate(unique_papers, 1):
-        title = p.get("title", "").strip()
-        authors = ", ".join(p.get("authors", [])[:3])
-        cats = ", ".join(p.get("categories", [])[:3]) if isinstance(p.get("categories"), list) else str(p.get("categories", ""))
-        
-        # Prefer AI-enhanced fields for higher information density
-        ai_info = p.get("AI", {})
-        
-        # Use AI.tldr if available (more concise than raw abstract)
-        tldr = (ai_info.get("tldr") or "").strip()
-        if not tldr:
-            summary = p.get("summary", "").strip().replace("\n", " ")
-            if len(summary) > 350:
-                summary = summary[:350] + "..."
-            tldr = summary
-        
-        # Build structured info from AI fields
-        motivation = (ai_info.get("motivation") or "").strip()
-        method = (ai_info.get("method") or "").strip()
-        cross_potential = (ai_info.get("remote_sensing_cross") or "").strip()
-        translated_title = (ai_info.get("translated_title") or "").strip()
-        
-        entry = f"[{i}] Title: {title}"
-        if translated_title:
-            entry += f" ({translated_title})"
-        entry += f"\n    Authors: {authors} | Categories: {cats}"
-        entry += f"\n    TLDR: {tldr}"
-        if motivation:
-            entry += f"\n    Motivation: {motivation}"
-        if method:
-            entry += f"\n    Method: {method}"
-        if cross_potential:
-            entry += f"\n    CrossPotential: {cross_potential}"
-        
-        formatted_list.append(entry)
-        
+            i = len(formatted_list) + 1
+            title = item.get("title", "").strip()
+            authors = ", ".join(item.get("authors", [])[:3])
+            cats = ", ".join(item.get("categories", [])[:3]) if isinstance(item.get("categories"), list) else str(item.get("categories", ""))
+            
+            # Prefer AI-enhanced fields for higher information density
+            ai_info = item.get("AI", {})
+            
+            # Use AI.tldr if available (more concise than raw abstract)
+            tldr = (ai_info.get("tldr") or "").strip()
+            if not tldr:
+                summary = item.get("summary", "").strip().replace("\n", " ")
+                if len(summary) > 350:
+                    summary = summary[:350] + "..."
+                tldr = summary
+            
+            # Build structured info from AI fields
+            motivation = (ai_info.get("motivation") or "").strip()
+            method = (ai_info.get("method") or "").strip()
+            cross_potential = (ai_info.get("remote_sensing_cross") or "").strip()
+            translated_title = (ai_info.get("translated_title") or "").strip()
+            
+            entry = f"[{i}] Title: {title}"
+            if translated_title:
+                entry += f" ({translated_title})"
+            entry += f"\n    Authors: {authors} | Categories: {cats}"
+            entry += f"\n    TLDR: {tldr}"
+            if motivation:
+                entry += f"\n    Motivation: {motivation}"
+            if method:
+                entry += f"\n    Method: {method}"
+            if cross_potential:
+                entry += f"\n    CrossPotential: {cross_potential}"
+            
+            formatted_list.append(entry)
+
+            if len(formatted_list) >= max_papers:
+                break
+
     return "\n\n".join(formatted_list)
 
 def fetch_temporal_context(target_date_str: str, db_path: str = DEFAULT_DB_PATH) -> Tuple[str, str]:

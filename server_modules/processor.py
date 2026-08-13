@@ -168,10 +168,45 @@ def scan_and_process_files():
                 if not os.path.exists(filepath):
                     continue
                     
+                # 分块缓冲写入，避免一次性在内存中累积整批论文/关键词列表导致 OOM。
+                # keyword_stats 的 ON CONFLICT 累加是幂等的，分块多次插入结果一致。
+                CHUNK_PAPERS = 500
+                CHUNK_KEYWORDS = 2000
+
                 stats_map = {}
-                paper_keywords_list = []
-                papers_list = []
-                
+                paper_keywords_buf = []
+                papers_buf = []
+
+                def flush_papers():
+                    if papers_buf:
+                        cursor.executemany(
+                            "INSERT OR REPLACE INTO papers (paper_id, paper_date, language, paper_json) VALUES (?, ?, ?, ?)",
+                            papers_buf
+                        )
+                        papers_buf.clear()
+
+                def flush_keywords():
+                    if paper_keywords_buf:
+                        cursor.executemany(
+                            "INSERT INTO paper_keywords (paper_id, paper_date, language, category, keyword) VALUES (?, ?, ?, ?, ?)",
+                            paper_keywords_buf
+                        )
+                        paper_keywords_buf.clear()
+
+                def flush_stats():
+                    if stats_map:
+                        rows = [
+                            (p_date, p_lang, p_cat, p_kw, freq)
+                            for (p_date, p_lang, p_cat, p_kw), freq in stats_map.items()
+                        ]
+                        cursor.executemany("""
+                        INSERT INTO keyword_stats (paper_date, language, category, keyword, frequency)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(paper_date, language, category, keyword)
+                        DO UPDATE SET frequency = frequency + excluded.frequency
+                        """, rows)
+                        stats_map.clear()
+
                 with open(filepath, "r", encoding="utf-8") as f_in:
                     for line in f_in:
                         line_str = line.strip()
@@ -187,7 +222,9 @@ def scan_and_process_files():
                             continue
                         
                         if not already_in_papers:
-                            papers_list.append((paper_id, paper_date, lang, json.dumps(paper)))
+                            papers_buf.append((paper_id, paper_date, lang, json.dumps(paper)))
+                            if len(papers_buf) >= CHUNK_PAPERS:
+                                flush_papers()
                             
                         if not already_processed:
                             cats = paper.get("categories", [])
@@ -219,33 +256,17 @@ def scan_and_process_files():
                                 unique_kws[kw] = unique_kws.get(kw, 0) + freq
                                 
                             for kw, freq in unique_kws.items():
-                                paper_keywords_list.append((paper_id, paper_date, lang, category, kw))
+                                paper_keywords_buf.append((paper_id, paper_date, lang, category, kw))
                                 key = (paper_date, lang, category, kw)
                                 stats_map[key] = stats_map.get(key, 0) + freq
                                 
-                if papers_list:
-                    cursor.executemany(
-                        "INSERT OR REPLACE INTO papers (paper_id, paper_date, language, paper_json) VALUES (?, ?, ?, ?)",
-                        papers_list
-                    )
-                    
-                if paper_keywords_list:
-                    cursor.executemany(
-                        "INSERT INTO paper_keywords (paper_id, paper_date, language, category, keyword) VALUES (?, ?, ?, ?, ?)",
-                        paper_keywords_list
-                    )
-                    
-                stats_insert_data = []
-                for (p_date, p_lang, p_cat, p_kw), freq in stats_map.items():
-                    stats_insert_data.append((p_date, p_lang, p_cat, p_kw, freq))
-                    
-                if stats_insert_data:
-                    cursor.executemany("""
-                    INSERT INTO keyword_stats (paper_date, language, category, keyword, frequency)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(paper_date, language, category, keyword)
-                    DO UPDATE SET frequency = frequency + excluded.frequency
-                    """, stats_insert_data)
+                            if len(paper_keywords_buf) >= CHUNK_KEYWORDS:
+                                flush_keywords()
+                                flush_stats()
+
+                flush_papers()
+                flush_keywords()
+                flush_stats()
                     
                 if not already_processed:
                     cursor.execute("INSERT OR REPLACE INTO processed_files (filename) VALUES (?)", (filename,))

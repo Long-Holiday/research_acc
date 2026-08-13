@@ -81,10 +81,10 @@ def get_papers_range(
         WHERE paper_date BETWEEN ? AND ? 
           AND language = ?
         """, (start_date, end_date, lang))
-        rows = cursor.fetchall()
         
         papers = []
-        for paper_json, paper_date in rows:
+        # 用游标惰性迭代替代 fetchall，避免一次性把全部行读入内存
+        for paper_json, paper_date in cursor:
             try:
                 p = json.loads(paper_json)
                 p['date'] = paper_date

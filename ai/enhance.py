@@ -2,7 +2,8 @@ import os
 import json
 import sys
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict
 from queue import Queue
 from threading import Lock
@@ -136,8 +137,8 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
 
     return item
 
-def process_all_items(data: List[Dict], model_name: str, language: str, max_workers: int) -> List[Dict]:
-    """并行处理所有数据项"""
+def build_chain(model_name: str):
+    """构建 LangChain 处理链（供流式处理复用，避免每个 worker 重复创建）。"""
     if model_name.lower().startswith("gemini"):
         llm = ChatGoogleGenerativeAI(
             model=model_name,
@@ -149,48 +150,87 @@ def process_all_items(data: List[Dict], model_name: str, language: str, max_work
         ).with_structured_output(Structure, method="function_calling")
 
     print('Connect to:', model_name, file=sys.stderr)
-    
+
     prompt_template = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(system),
         HumanMessagePromptTemplate.from_template(template=template)
     ])
 
-    chain = prompt_template | llm
-    
-    # 使用线程池并行处理
-    processed_data = [None] * len(data)  # 预分配结果列表
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 提交所有任务
-        future_to_idx = {
-            executor.submit(process_single_item, chain, item, language): idx
-            for idx, item in enumerate(data)
-        }
-        
-        # 使用tqdm显示进度
-        for future in tqdm(
-            as_completed(future_to_idx),
-            total=len(data),
-            desc="Processing items"
-        ):
-            idx = future_to_idx[future]
+    return prompt_template | llm
+
+
+def _count_unique_ids(filepath: str) -> int:
+    """快速统计去重后的论文条数（仅用于进度条，不做完整 JSON 解析）。"""
+    seen = set()
+    id_pat = re.compile(r'"id"\s*:\s*"([^"]+)"')
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            match = id_pat.search(line)
+            if match:
+                seen.add(match.group(1))
+    return len(seen)
+
+
+def process_all_items_streaming(
+    input_path: str,
+    output_path: str,
+    model_name: str,
+    language: str,
+    max_workers: int,
+):
+    """流式并行处理所有数据项：边读边去重、边处理边写结果文件。
+
+    相比一次性把全部数据读入内存（data + 去重副本 + 结果副本 + 全部 future），
+    这里用「滑动窗口」限制同时在途的任务数为 max_workers，结果完成后立即落盘，
+    内存占用只与并发窗口大小相关，不随论文总数增长。
+    """
+    chain = build_chain(model_name)
+    total = _count_unique_ids(input_path)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor, \
+            open(input_path, "r", encoding="utf-8") as fin, \
+            open(output_path, "w", encoding="utf-8") as fout:
+
+        seen_ids = set()
+        pending = deque()
+
+        def flush_one(future):
             try:
                 result = future.result()
-                processed_data[idx] = result
             except Exception as e:
-                print(f"Item at index {idx} generated an exception: {e}", file=sys.stderr)
-                # Add default AI fields to ensure consistency
-                processed_data[idx] = data[idx]
-                processed_data[idx]['AI'] = {
-                    "translated_title": "",
-                    "tldr": "Processing failed",
-                    "motivation": "Processing failed",
-                    "method": "Processing failed",
-                    "result": "Processing failed",
-                    "conclusion": "Processing failed",
-                    "remote_sensing_cross": "Processing failed"
-                }
-    
-    return processed_data
+                print(f"Item generated an exception: {e}", file=sys.stderr)
+                return
+            if result is not None:
+                fout.write(json.dumps(result, ensure_ascii=False) + "\n")
+
+        with tqdm(total=total, desc="Processing items") as pbar:
+            for line in fin:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except Exception:
+                    continue
+
+                pid = item.get('id')
+                if not pid or pid in seen_ids:
+                    continue
+                seen_ids.add(pid)
+
+                pending.append(
+                    executor.submit(process_single_item, chain, item, language)
+                )
+
+                # 窗口满时，按提交顺序写出最早完成的结果，控制内存
+                if len(pending) >= max_workers:
+                    flush_one(pending.popleft())
+                    pbar.update(1)
+
+            while pending:
+                flush_one(pending.popleft())
+                pbar.update(1)
+
 
 def main():
     args = parse_args()
@@ -203,36 +243,15 @@ def main():
         os.remove(target_file)
         print(f'Removed existing file: {target_file}', file=sys.stderr)
 
-    # 读取数据
-    data = []
-    with open(args.data, "r", encoding="utf-8") as f:
-        for line in f:
-            data.append(json.loads(line))
-
-    # 去重
-    seen_ids = set()
-    unique_data = []
-    for item in data:
-        if item['id'] not in seen_ids:
-            seen_ids.add(item['id'])
-            unique_data.append(item)
-
-    data = unique_data
     print('Open:', args.data, file=sys.stderr)
-    
-    # 并行处理所有数据
-    processed_data = process_all_items(
-        data,
-        model_name,
-        language,
-        args.max_workers
+
+    process_all_items_streaming(
+        input_path=args.data,
+        output_path=target_file,
+        model_name=model_name,
+        language=language,
+        max_workers=args.max_workers,
     )
-    
-    # 保存结果
-    with open(target_file, "w", encoding="utf-8") as f:
-        for item in processed_data:
-            if item is not None:
-                f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 if __name__ == "__main__":
     main()

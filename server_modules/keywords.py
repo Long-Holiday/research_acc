@@ -40,7 +40,8 @@ def get_nlp():
     if not nlp_loaded:
         try:
             import spacy
-            nlp = spacy.load("en_core_web_sm")
+            # 禁用关键词提取不需要的组件（NER 等），减少常驻内存占用。
+            nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
         except Exception as e:
             print(f"Failed to load spaCy model 'en_core_web_sm': {e}")
             nlp = None
