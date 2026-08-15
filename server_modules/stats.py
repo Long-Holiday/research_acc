@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import math
 from datetime import datetime, timedelta
 from typing import List, Optional
 from pydantic import BaseModel, Field
@@ -16,17 +17,19 @@ router = APIRouter()
 
 
 def _filter_network_links(links, min_value=2, max_links=180, max_degree=12):
-    """Keep deterministic strong links while limiting visual network density."""
+    """Keep deterministic strong links with high specificity while limiting visual network density."""
     candidates = []
     for link in links:
         source = str(link.get("source", ""))
         target = str(link.get("target", ""))
         value = float(link.get("value", 0))
+        npmi = float(link.get("npmi", 0.0))
         if source and target and source != target and value >= min_value:
-            candidates.append({"source": source, "target": target, "value": value})
+            sort_weight = value * (1.0 + max(0.0, npmi))
+            candidates.append({"source": source, "target": target, "value": value, "sort_weight": sort_weight})
 
     candidates.sort(key=lambda link: (
-        -link["value"], link["source"], link["target"]
+        -link.get("sort_weight", link["value"]), -link["value"], link["source"], link["target"]
     ))
 
     degree = {}
@@ -105,7 +108,7 @@ def fetch_top_papers_from_openalex(issn_list, from_date):
         paper_url = paper.get("doi") or (primary_loc.get("landing_page_url") if isinstance(primary_loc, dict) else "") or ""
         pub_date = paper.get("publication_date") or ""
         
-        # Calculate citations per day and hotness score
+        # Calculate citations per day and hotness score using Bayesian smoothed decay
         citations_per_day = 0.0
         hotness_score = 0.0
         if pub_date:
@@ -114,8 +117,10 @@ def fetch_top_papers_from_openalex(issn_list, from_date):
                 days_since = (datetime.now() - pub_dt).days
                 days_since = max(days_since, 0)
                 citations_per_day = round(cited_by / max(days_since, 1), 2)
-                # Time decay formula: Citations / (Days_Since_Pub + 1)^1.5
-                hotness_score = cited_by / ((days_since + 1) ** 1.5)
+                # Bayesian smoothed half-life decay model: avoids zero-citation cliff & over-punishing 30-90 day papers
+                half_life_days = 90.0
+                decay = math.exp(-0.693 * days_since / half_life_days)
+                hotness_score = round(((cited_by + 0.1) / math.pow(days_since + 5, 0.75)) * (1.0 + decay), 4)
             except Exception:
                 pass
 
@@ -135,6 +140,16 @@ def fetch_top_papers_from_openalex(issn_list, from_date):
 import sys
 IS_TESTING = "pytest" in sys.modules or "unittest" in sys.modules
 
+def get_db_path():
+    if config.DB_PATH != "data/statistics.db":
+        return config.DB_PATH
+    import server
+    import server_modules.processor as processor
+    if hasattr(server, "DB_PATH") and getattr(server, "DB_PATH") != "data/statistics.db":
+        return getattr(server, "DB_PATH")
+    if hasattr(processor, "DB_PATH") and getattr(processor, "DB_PATH") != "data/statistics.db":
+        return getattr(processor, "DB_PATH")
+    return config.DB_PATH
 @router.get("/api/stats/keywords")
 def get_keyword_stats(
     start_date: str, 
@@ -149,10 +164,11 @@ def get_keyword_stats(
         except Exception as e:
             pass
             
-    if not os.path.exists(config.DB_PATH):
+    db_path = get_db_path()
+    if not os.path.exists(db_path):
         return {"keywords": [], "daily_trends": []}
         
-    conn = connect_db(config.DB_PATH)
+    conn = connect_db(db_path)
     try:
         cursor = conn.cursor()
         
@@ -243,7 +259,7 @@ def get_keyword_stats(
             else:
                 entry["rate"] = 0.0
                 
-            # Mann-Kendall Trend on penetration rate
+            # Mann-Kendall & Momentum Trend on penetration rate
             if N >= 3 and entry["count"] >= 3:
                 rates = []
                 for i in range(N):
@@ -301,10 +317,11 @@ def get_network_stats(
         except Exception as e:
             pass
             
-    if not os.path.exists(config.DB_PATH):
+    db_path = get_db_path()
+    if not os.path.exists(db_path):
         return {"nodes": [], "links": []}
         
-    conn = connect_db(config.DB_PATH)
+    conn = connect_db(db_path)
     try:
         cursor = conn.cursor()
         
@@ -393,10 +410,31 @@ def get_network_stats(
                 
             cursor.execute(sql, links_params)
             links_rows = cursor.fetchall()
-            links = _filter_network_links([
-                {"source": row[0], "target": row[1], "value": row[2]}
-                for row in links_rows
-            ])
+            
+            # 计算总论文数与各节点的单点频次以求取 NPMI 特异性
+            cursor.execute("SELECT COUNT(DISTINCT paper_id) FROM paper_keywords WHERE paper_date BETWEEN ? AND ? AND language = ?", (start_date, end_date, lang))
+            total_papers_count = max(1, cursor.fetchone()[0] or 1)
+            node_freq_map = {row[0]: row[1] for row in nodes_rows}
+            
+            raw_links = []
+            for row in links_rows:
+                s, t, cooccur = row[0], row[1], row[2]
+                n_s = max(1, node_freq_map.get(s, 1))
+                n_t = max(1, node_freq_map.get(t, 1))
+                p_s = n_s / total_papers_count
+                p_t = n_t / total_papers_count
+                p_st = cooccur / total_papers_count
+                
+                npmi = 0.0
+                if p_st > 0 and p_s > 0 and p_t > 0:
+                    try:
+                        pmi = math.log(p_st / (p_s * p_t))
+                        npmi = pmi / (-math.log(p_st))
+                    except Exception:
+                        npmi = 0.0
+                raw_links.append({"source": s, "target": t, "value": cooccur, "npmi": npmi})
+                
+            links = _filter_network_links(raw_links)
             linked_node_ids = {endpoint for link in links for endpoint in (
                 link["source"], link["target"]
             )}
@@ -448,8 +486,9 @@ def get_hot_papers(journal: str, period: int, token: str = Depends(verify_token)
     if cache_key in _hot_papers_memory_cache:
         return _hot_papers_memory_cache[cache_key]
         
-    os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
-    conn = connect_db(config.DB_PATH)
+    db_path = get_db_path()
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = connect_db(db_path)
     
     try:
         cursor = conn.cursor()
@@ -476,7 +515,9 @@ def get_hot_papers(journal: str, period: int, token: str = Depends(verify_token)
                             days_since = (datetime.now() - pub_dt).days
                             days_since = max(days_since, 0)
                             citations_per_day = round(cited_by / max(days_since, 1), 2)
-                            hotness_score = cited_by / ((days_since + 1) ** 1.5)
+                            half_life_days = 90.0
+                            decay = math.exp(-0.693 * days_since / half_life_days)
+                            hotness_score = round(((cited_by + 0.1) / math.pow(days_since + 5, 0.75)) * (1.0 + decay), 4)
                         except Exception:
                             pass
                     if "citations_per_day" not in paper:

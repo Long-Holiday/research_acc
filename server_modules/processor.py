@@ -14,9 +14,11 @@ cache_initialized = False
 
 def scan_and_process_files():
     global cache_initialized
+    import sys
+    is_testing = "pytest" in sys.modules or "unittest" in sys.modules
     db_dir = "data"
     os.makedirs(db_dir, exist_ok=True)
-    if not os.path.exists(DB_PATH):
+    if is_testing or not os.path.exists(DB_PATH):
         processed_files_cache.clear()
         cache_initialized = False
     

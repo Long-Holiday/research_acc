@@ -172,7 +172,12 @@ def get_papers_range(
         except Exception:
             pass
             
-    if not os.path.exists(config.DB_PATH):
+    def get_db_path():
+        import server_modules.processor as processor
+        return getattr(processor, "DB_PATH", config.DB_PATH)
+
+    db_path = get_db_path()
+    if not os.path.exists(db_path):
         if page is not None:
             return {
                 "items": [],
@@ -186,7 +191,7 @@ def get_papers_range(
             }
         return []
         
-    conn = connect_db(config.DB_PATH)
+    conn = connect_db(db_path)
     try:
         cursor = conn.cursor()
         

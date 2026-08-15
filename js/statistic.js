@@ -1857,8 +1857,26 @@ function drawQuadrantChart(keywords) {
     return;
   }
 
-  // 取 Top 25 个关键词作为散点展现
-  const scatterData = validKeywords.slice(0, 25).map(item => {
+  // 双池采样策略：高频池(Top 15) + 高增长潜力池(Top 15) + 降温池(Top 8)，确保新兴趋势象限拥有真实候选
+  const topByCount = [...validKeywords].sort((a, b) => b.count - a.count).slice(0, 15);
+  const topByGrowth = [...validKeywords].filter(k => (k.growth_rate || 0) > 0.03).sort((a, b) => (b.growth_rate || 0) - (a.growth_rate || 0)).slice(0, 15);
+  const topCooling = [...validKeywords].filter(k => (k.growth_rate || 0) < -0.03 && (k.count || 0) >= 2).sort((a, b) => (a.growth_rate || 0) - (b.growth_rate || 0)).slice(0, 8);
+
+  const mergedMap = new Map();
+  [...topByCount, ...topByGrowth, ...topCooling].forEach(item => {
+    if (!mergedMap.has(item.keyword)) {
+      mergedMap.set(item.keyword, item);
+    }
+  });
+
+  // 若合并后词量较少，补齐剩余高频词
+  if (mergedMap.size < 20) {
+    validKeywords.slice(0, 30).forEach(item => {
+      if (!mergedMap.has(item.keyword)) mergedMap.set(item.keyword, item);
+    });
+  }
+
+  const scatterData = Array.from(mergedMap.values()).slice(0, 30).map(item => {
     const rateVal = Math.round((item.growth_rate || 0) * 100);
     return {
       keyword: item.keyword,
@@ -1884,7 +1902,7 @@ function drawQuadrantChart(keywords) {
     .append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`);
 
-  // 计算 X 轴和 Y 轴刻度范围与分割线
+  // 计算 X 轴和 Y 轴刻度范围与动态中位数分割线
   const xExtent = d3.extent(scatterData, d => d.valueX);
   const xMin = Math.max(0, (xExtent[0] || 0) * 0.8);
   const xMax = (xExtent[1] || 10) * 1.15;
@@ -1896,7 +1914,9 @@ function drawQuadrantChart(keywords) {
   const xScale = d3.scaleLinear().domain([xMin, xMax]).nice().range([0, width]);
   const yScale = d3.scaleLinear().domain([yMin, yMax]).nice().range([height, 0]);
 
-  const midX = (xMin + xMax) / 2;
+  // 使用中位数（Median）作为 X 轴中轴分割线，彻底消除高频离群值拉偏坐标系
+  const medianX = d3.median(scatterData, d => d.valueX);
+  const midX = (medianX !== undefined && medianX > xMin && medianX < xMax) ? medianX : ((xMin + xMax) / 2);
   const midY = 0; // 0% 增长率线为分割
 
   // 1. 绘制四个象限背景块

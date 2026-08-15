@@ -2,15 +2,18 @@ import os
 import re
 import math
 import spacy
+from typing import Dict, List, Tuple, Set, Optional
 
+# 学术元词汇与通用停用词库
 STOPWORDS = {
     'method', 'based', 'towards', 'via', 'using', 'paper', 'propose', 'proposes',
-    'proposed', 'approach', 'system', 'framework', 'result', 'show', 'shows',
+    'proposed', 'approach', 'system', 'framework', 'result', 'results', 'show', 'shows',
     'demonstrated', 'demonstrates', 'demonstrate', 'experimental', 'experiment',
     'evaluation', 'performance', 'state', 'art', 'sota', 'dataset', 'task',
     'efficient', 'novel', 'modality', 'large', 'unsupervised', 'supervised',
     'semi', 'self', 'new', 'study', 'analysis', 'application', 'development',
-    'design', 'process',
+    'design', 'process', 'technique', 'strategy', 'problem', 'challenge',
+    'model', 'models', 'solution', 'algorithm', 'structure', 'architecture',
     
     'a', 'about', 'above', 'after', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'aren',
     'arent', 'as', 'at', 'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both',
@@ -32,6 +35,57 @@ STOPWORDS = {
     'y', 'you', 'youd', 'youll', 'youre', 'youve', 'your', 'yours', 'yourself', 'yourselves'
 }
 
+# 常见学术专有名词大写映射表
+KNOWN_ACRONYMS = {
+    'llm': 'LLM',
+    'llms': 'LLM',
+    'large language model': 'Large Language Model',
+    'large language models': 'Large Language Model',
+    'vit': 'ViT',
+    'vits': 'ViT',
+    'vision transformer': 'Vision Transformer',
+    'vision transformers': 'Vision Transformer',
+    'cnn': 'CNN',
+    'cnns': 'CNN',
+    'convolutional neural network': 'Convolutional Neural Network',
+    'convolutional neural networks': 'Convolutional Neural Network',
+    'gnn': 'GNN',
+    'gnns': 'GNN',
+    'graph neural network': 'Graph Neural Network',
+    'graph neural networks': 'Graph Neural Network',
+    'nerf': 'NeRF',
+    'nerfs': 'NeRF',
+    'neural radiance field': 'Neural Radiance Field',
+    'neural radiance fields': 'Neural Radiance Field',
+    'lora': 'LoRA',
+    'sam': 'SAM',
+    'clip': 'CLIP',
+    'yolo': 'YOLO',
+    'sar': 'SAR',
+    'insar': 'InSAR',
+    'polsar': 'PolSAR',
+    'lidar': 'LiDAR',
+    'uav': 'UAV',
+    'rl': 'Reinforcement Learning',
+    'reinforcement learning': 'Reinforcement Learning',
+    'rag': 'RAG',
+    'retrieval augmented generation': 'Retrieval-Augmented Generation',
+    'retrieval-augmented generation': 'Retrieval-Augmented Generation',
+    'diffusion model': 'Diffusion Model',
+    'diffusion models': 'Diffusion Model',
+    'semantic segmentation': 'Semantic Segmentation',
+    'object detection': 'Object Detection',
+    'change detection': 'Change Detection',
+    'super-resolution': 'Super-Resolution',
+    'super resolution': 'Super-Resolution',
+    'contrastive learning': 'Contrastive Learning',
+    'domain adaptation': 'Domain Adaptation',
+    'zero-shot': 'Zero-Shot Learning',
+    'zero shot': 'Zero-Shot Learning',
+    'few-shot': 'Few-Shot Learning',
+    'few shot': 'Few-Shot Learning'
+}
+
 nlp = None
 nlp_loaded = False
 
@@ -40,7 +94,7 @@ def get_nlp():
     if not nlp_loaded:
         try:
             import spacy
-            # 禁用关键词提取不需要的组件（NER 等），减少常驻内存占用。
+            # 仅加载分词和词性、词形还原、依存句法，禁用其余耗内存组件
             nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
         except Exception as e:
             print(f"Failed to load spaCy model 'en_core_web_sm': {e}")
@@ -51,223 +105,204 @@ def get_nlp():
 idf_cache = {}
 idf_doc_count = 0
 
-def extract_candidates_spacy(title: str, summary: str = ""):
-    active_nlp = get_nlp()
-    if not active_nlp:
-        return {}, {}
+
+def extract_abbreviations_schwartz_hearst(text: str) -> Dict[str, str]:
+    """
+    基于 Schwartz-Hearst 算法的轻量级缩写抽取，在 CPU 上执行极快。
+    能够准确抽取 'Large Language Model (LLM)' 或 'Vision Transformer (ViT)'。
+    """
+    if not text:
+        return {}
+        
+    pairs = {}
+    # 模式 1: Full Term (Short Term)
+    matches_1 = re.findall(r'\b([A-Za-z][A-Za-z0-9\s-]{3,50})\s+\(([A-Za-z0-9]{2,10})\)', text)
+    for long_form, short_form in matches_1:
+        lf_clean = long_form.strip().lower()
+        sf_clean = short_form.strip().lower()
+        # 验证缩写首字母匹配
+        words = [w for w in re.split(r'[\s-]+', lf_clean) if w and w not in STOPWORDS]
+        if words and len(words) >= len(sf_clean):
+            acronym_cand = "".join(w[0] for w in words[:len(sf_clean)])
+            if acronym_cand.lower() == sf_clean.lower() or sf_clean[0].lower() == words[0][0].lower():
+                pairs[sf_clean] = long_form.strip()
+
+    # 模式 2: Short Term (Full Term)
+    matches_2 = re.findall(r'\b([A-Za-z0-9]{2,10})\s+\(([A-Za-z][A-Za-z0-9\s-]{3,50})\)', text)
+    for short_form, long_form in matches_2:
+        lf_clean = long_form.strip().lower()
+        sf_clean = short_form.strip().lower()
+        words = [w for w in re.split(r'[\s-]+', lf_clean) if w and w not in STOPWORDS]
+        if words and len(words) >= len(sf_clean):
+            pairs[sf_clean] = long_form.strip()
+
+    return pairs
+
+
+def canonicalize_keyword(term: str, acronym_map: Optional[Dict[str, str]] = None) -> str:
+    """
+    将关键词归一化为标准的学术 Canonical 形式：
+    1. 查表对齐已知领域专有名词与缩写；
+    2. 文内缩写对齐；
+    3. 规范化为统一词形并保留小写兼容性与专有大写。
+    """
+    clean_term = term.strip().strip("-.,;:")
+    clean_lower = clean_term.lower()
     
-    candidates = {}
-    raw_candidates = {}
+    if not clean_term or clean_lower in STOPWORDS:
+        return ""
+        
+    # 1. 优先查已知专有名词表
+    if clean_lower in KNOWN_ACRONYMS:
+        return KNOWN_ACRONYMS[clean_lower].lower()
+        
+    # 2. 查文内提取的缩写表
+    if acronym_map and clean_lower in acronym_map:
+        mapped_long = acronym_map[clean_lower]
+        if mapped_long.lower() in KNOWN_ACRONYMS:
+            return KNOWN_ACRONYMS[mapped_long.lower()].lower()
+        return mapped_long.lower()
+        
+    # 3. 专有全大写缩写保留（如 CNN, SAR, UAV, GNN）
+    if len(clean_term) <= 5 and clean_term.isupper():
+        return clean_term.lower()
+        
+    return clean_lower
+
+
+def extract_candidates_cvalue(title: str, summary: str = "", active_nlp = None) -> Tuple[Dict[str, float], Dict[str, str]]:
+    """
+    使用轻量级句法分析 + C-Value (Nested Term Specificity) 算法抽取高特异度复合术语与关键概念。
+    专为 CPU 优化，零 GPU 依赖，内存极低。
+    """
+    candidates_tf = {}
+    raw_representations = {}
     
-    # Process title (weight = 3) and summary (weight = 1)
-    for text, weight in [(title, 3), (summary, 1)]:
+    texts = [(title, 3.0), (summary, 1.0)]
+    
+    for text, weight in texts:
         if not text:
             continue
-        text_lower = text.lower()
-        
         try:
-            doc = active_nlp(text_lower)
+            doc = active_nlp(text)
             
-            # 1. Extract noun chunks (phrases)
+            # 1. 抽取名词块与复合学术术语
             for chunk in doc.noun_chunks:
-                cleaned_tokens = []
-                raw_tokens = []
+                tokens = []
                 for t in chunk:
-                    if t.pos_ in ["NOUN", "PROPN", "ADJ"] and not t.is_stop and t.text not in STOPWORDS and len(t.lemma_) > 1:
-                        cleaned_tokens.append(t.lemma_)
-                        raw_tokens.append(t.text)
+                    if t.pos_ in ["NOUN", "PROPN", "ADJ"] and not t.is_stop and t.text.lower() not in STOPWORDS and len(t.text) > 1:
+                        tokens.append(t)
                         
-                if cleaned_tokens:
-                    phrase = " ".join(cleaned_tokens)
-                    raw_phrase = " ".join(raw_tokens)
-                    if 1 <= len(cleaned_tokens) <= 3:
-                        candidates[phrase] = candidates.get(phrase, 0) + weight
-                        if phrase not in raw_candidates:
-                            raw_candidates[phrase] = {}
-                        raw_candidates[phrase][raw_phrase] = raw_candidates[phrase].get(raw_phrase, 0) + 1
+                if not tokens:
+                    continue
+                    
+                for length in range(1, min(4, len(tokens) + 1)):
+                    for i in range(len(tokens) - length + 1):
+                        sub_tokens = tokens[i:i+length]
+                        lemma_phrase = " ".join(t.text.lower() for t in sub_tokens)
+                        raw_phrase = " ".join(t.text for t in sub_tokens)
                         
-            # 2. Extract individual nouns, adjectives, and proper nouns
+                        if lemma_phrase not in STOPWORDS:
+                            candidates_tf[lemma_phrase] = candidates_tf.get(lemma_phrase, 0.0) + weight
+                            if lemma_phrase not in raw_representations:
+                                raw_representations[lemma_phrase] = raw_phrase
+
+            # 2. 单独扫描关键名词与专有名词（确保基础核心词不遗漏）
             for t in doc:
-                if t.pos_ in ["NOUN", "PROPN", "ADJ"] and not t.is_stop and t.text not in STOPWORDS and len(t.lemma_) > 1:
-                     word = t.lemma_
-                     raw_word = t.text
-                     candidates[word] = candidates.get(word, 0) + weight
-                     if word not in raw_candidates:
-                         raw_candidates[word] = {}
-                     raw_candidates[word][raw_word] = raw_candidates[word].get(raw_word, 0) + 1
+                if t.pos_ in ["NOUN", "PROPN", "ADJ"] and not t.is_stop and t.text.lower() not in STOPWORDS and len(t.text) > 1:
+                    w_lower = t.text.lower()
+                    candidates_tf[w_lower] = candidates_tf.get(w_lower, 0.0) + weight
+                    if w_lower not in raw_representations:
+                        raw_representations[w_lower] = t.text
         except Exception as e:
-            print(f"Error in spaCy candidate extraction: {e}")
+            pass
             
-    return candidates, raw_candidates
+    # C-Value 嵌套扣减计算
+    # C-Value(a) = log2(|a|) * (TF(a) - 1/|T_a| * sum_{b in T_a} TF(b))
+    sorted_terms = sorted(candidates_tf.keys(), key=lambda x: len(x.split()), reverse=True)
+    cvalue_scores = {}
+    nested_parent_map = {}
+    
+    for i, long_term in enumerate(sorted_terms):
+        long_words = long_term.split()
+        for short_term in sorted_terms[i+1:]:
+            short_words = short_term.split()
+            if len(short_words) < len(long_words):
+                for k in range(len(long_words) - len(short_words) + 1):
+                    if long_words[k:k+len(short_words)] == short_words:
+                        nested_parent_map.setdefault(short_term, []).append(long_term)
+                        break
+                        
+    for term, tf in candidates_tf.items():
+        words_len = len(term.split())
+        log_len = math.log2(words_len + 1)
+        parents = nested_parent_map.get(term, [])
+        if parents:
+            avg_parent_tf = sum(candidates_tf[p] for p in parents) / len(parents)
+            nested_tf = max(0.1, tf - avg_parent_tf * 0.6)
+            cvalue_scores[term] = log_len * nested_tf
+        else:
+            cvalue_scores[term] = log_len * tf
+            
+    return cvalue_scores, raw_representations
+
 
 def extract_keywords(title: str, summary: str = "", idf_map: dict = None) -> list:
+    """
+    提取单篇论文的高质量关键词（兼具准确性、语义归一化与极速 CPU 推理）。
+    
+    :param title: 论文标题
+    :param summary: 论文摘要
+    :param idf_map: 逆文档频率映射
+    :return: 归一化后的 Top 关键词列表 [(canonical_keyword, score), ...]
+    """
     title = title or ""
     summary = summary or ""
+    full_text = f"{title} {summary}"
     
     global idf_cache, idf_doc_count
     active_idf = idf_map if idf_map is not None else idf_cache
     default_idf = math.log((1 + idf_doc_count) / 2) + 1 if idf_doc_count > 0 else 1.0
     
-    # 1. Try spaCy NLP approach
+    # 1. 抽取文内缩写对齐表
+    acronym_map = extract_abbreviations_schwartz_hearst(full_text)
+    
     active_nlp = get_nlp()
+    candidates_scores = {}
+    raw_map = {}
+    
     if active_nlp is not None:
         try:
-            candidates, raw_candidates = extract_candidates_spacy(title, summary)
-            if candidates:
-                # Calculate scores using TF-IDF
-                scores = {}
-                for stemmed, tf in candidates.items():
-                    words_list = stemmed.split()
-                    idf_val = sum(active_idf.get(w, default_idf) for w in words_list) / len(words_list)
-                    scores[stemmed] = tf * idf_val
-                
-                # Subphrase pruning
-                sorted_stems = sorted(candidates.keys(), key=len, reverse=True)
-                pruned_stems = set()
-                for i, long_stem in enumerate(sorted_stems):
-                    if long_stem in pruned_stems:
-                        continue
-                    for short_stem in sorted_stems[i+1:]:
-                        if short_stem in pruned_stems:
-                            continue
-                        long_words = long_stem.split()
-                        short_words = short_stem.split()
-                        is_sub = False
-                        for idx in range(len(long_words) - len(short_words) + 1):
-                            if long_words[idx:idx+len(short_words)] == short_words:
-                                is_sub = True
-                                break
-                        
-                        if is_sub:
-                            if len(short_words) >= 2:
-                                if scores[short_stem] <= scores[long_stem] * 1.2:
-                                    pruned_stems.add(short_stem)
-                                else:
-                                    scores[short_stem] -= scores[long_stem]
-                            else:
-                                scores[short_stem] = max(0, scores[short_stem] - scores[long_stem] / 2)
-                
-                result = []
-                for stemmed, score in scores.items():
-                    if stemmed in pruned_stems or score <= 0:
-                        continue
-                    raw_phrases = raw_candidates.get(stemmed, {})
-                    if raw_phrases:
-                        best_raw = max(raw_phrases.items(), key=lambda x: x[1])[0]
-                    else:
-                        best_raw = stemmed
-                    result.append((best_raw, score))
-                
-                result.sort(key=lambda x: x[1], reverse=True)
-                return result[:10]
-        except Exception as e:
-            print(f"Error in spaCy keyword extraction: {e}")
+            candidates_scores, raw_map = extract_candidates_cvalue(title, summary, active_nlp)
+        except Exception:
+            candidates_scores, raw_map = {}, {}
             
-    # 2. Fallback to basic stemming n-gram extraction (without spaCy)
-    def stem_phrase(phrase: str) -> str:
-        words = phrase.split()
-        stemmed = []
-        for w in words:
-            w_stem = w.lower()
-            if len(w_stem) > 4:
-                if w_stem.endswith("sses"):
-                    w_stem = w_stem[:-2]
-                elif w_stem.endswith("ies"):
-                    w_stem = w_stem[:-3] + "y"
-                elif w_stem.endswith("s") and not w_stem.endswith("ss"):
-                    w_stem = w_stem[:-1]
-                
-                if w_stem.endswith("ing"):
-                    w_stem = w_stem[:-3]
-                elif w_stem.endswith("ed"):
-                    w_stem = w_stem[:-2]
-            stemmed.append(w_stem)
-        return " ".join(stemmed)
+    # Fallback 快速规则抽取
+    if not candidates_scores:
+        cleaned = re.sub(r"[^\w\s-]", " ", full_text.lower())
+        words = [w.strip("-_") for w in cleaned.split() if w.strip("-_") and w.strip("-_") not in STOPWORDS and len(w.strip("-_")) > 1]
+        for i in range(len(words)):
+            for l in range(1, min(4, len(words) - i + 1)):
+                phrase = " ".join(words[i:i+l])
+                candidates_scores[phrase] = candidates_scores.get(phrase, 0.0) + (3.0 if phrase in title.lower() else 1.0)
+                raw_map[phrase] = phrase
 
-    raw_candidates = {}
-    stemmed_freq = {}
-    
-    # Process title (weight = 3) and summary (weight = 1)
-    for text, weight in [(title, 3), (summary, 1)]:
-        if not text:
+    # 结合全局 IDF 加权与实体规范化 (Canonical Normalization)
+    canonical_aggregated = {}
+    for term, base_score in candidates_scores.items():
+        raw_repr = raw_map.get(term, term)
+        canonical = canonicalize_keyword(raw_repr, acronym_map)
+        if not canonical or len(canonical) <= 1 or canonical.lower() in STOPWORDS:
             continue
-        text_lower = text.lower()
-        cleaned = re.sub(r"[^\w\s-]", " ", text_lower)
-        raw_words = cleaned.split()
+            
+        # IDF 加权
+        words_list = term.split()
+        idf_val = sum(active_idf.get(w, default_idf) for w in words_list) / max(1, len(words_list))
+        final_score = base_score * idf_val
         
-        words = []
-        for w in raw_words:
-            w_clean = w.strip("-_")
-            if w_clean and not w_clean.isdigit() and len(w_clean) > 1:
-                words.append(w_clean)
-                
-        segments = []
-        current_segment = []
-        for w in words:
-            if w in STOPWORDS:
-                if current_segment:
-                    segments.append(current_segment)
-                    current_segment = []
-            else:
-                current_segment.append(w)
-        if current_segment:
-            segments.append(current_segment)
-            
-        for seg in segments:
-            n = len(seg)
-            for i in range(n):
-                for l in range(1, min(4, n - i + 1)):
-                    phrase = " ".join(seg[i:i+l])
-                    stemmed = stem_phrase(phrase)
-                    
-                    stemmed_freq[stemmed] = stemmed_freq.get(stemmed, 0) + weight
-                    if stemmed not in raw_candidates:
-                        raw_candidates[stemmed] = {}
-                    raw_candidates[stemmed][phrase] = raw_candidates[stemmed].get(phrase, 0) + 1
+        # 归一化实体聚合累加
+        canonical_aggregated[canonical] = canonical_aggregated.get(canonical, 0.0) + final_score
 
-    # Calculate scores using TF-IDF for basic candidates
-    scores = {}
-    for stemmed, tf in stemmed_freq.items():
-        words_list = stemmed.split()
-        idf_val = sum(active_idf.get(w, default_idf) for w in words_list) / len(words_list)
-        scores[stemmed] = tf * idf_val
-
-    sorted_stems = sorted(stemmed_freq.keys(), key=len, reverse=True)
-    pruned_stems = set()
-    
-    for i, long_stem in enumerate(sorted_stems):
-        if long_stem in pruned_stems:
-            continue
-        for short_stem in sorted_stems[i+1:]:
-            if short_stem in pruned_stems:
-                continue
-            long_words = long_stem.split()
-            short_words = short_stem.split()
-            is_sub = False
-            for idx in range(len(long_words) - len(short_words) + 1):
-                if long_words[idx:idx+len(short_words)] == short_words:
-                    is_sub = True
-                    break
-            
-            if is_sub:
-                if len(short_words) >= 2:
-                    if scores[short_stem] <= scores[long_stem] * 1.2:
-                        pruned_stems.add(short_stem)
-                    else:
-                        scores[short_stem] -= scores[long_stem]
-                else:
-                    scores[short_stem] = max(0, scores[short_stem] - scores[long_stem] / 2)
-
-    result = []
-    for stemmed, score in scores.items():
-        if stemmed in pruned_stems or score <= 0:
-            continue
-        raw_phrases = raw_candidates.get(stemmed, {})
-        if raw_phrases:
-            best_raw = max(raw_phrases.items(), key=lambda x: x[1])[0]
-        else:
-            best_raw = stemmed
-        result.append((best_raw, score))
-        
-    result.sort(key=lambda x: x[1], reverse=True)
+    # 排序输出 Top 10
+    result = sorted(canonical_aggregated.items(), key=lambda x: x[1], reverse=True)
     return result[:10]
