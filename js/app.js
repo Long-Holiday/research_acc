@@ -19,7 +19,7 @@ let urlCategoryParam = null; // 从URL参数中获取的category
 let urlJsonParam = null; // 从URL参数中获取的json（API模式）
 let urlAuthorParam = null; // 从URL参数中获取的author
 let urlKeywordsParam = null; // 从URL参数中获取的keywords
-let paperData = {};
+let paperData = [];
 let flatpickrInstance = null;
 let isRangeMode = false;
 let activeKeywords = []; // 存储激活的关键词
@@ -31,6 +31,18 @@ let currentFilteredPapers = []; // 当前过滤后的论文列表
 let textSearchQuery = ''; // 实时文本搜索查询
 let previousActiveKeywords = null; // 文本搜索激活时，暂存之前的关键词激活集合
 let previousActiveAuthors = null; // 文本搜索激活时，暂存之前的作者激活集合
+
+// 触底加载/无限滚动状态管理
+let currentPage = 1;
+const pageSize = 20; // 每次加载 20 篇
+let totalPages = 1;
+let totalPapersCount = 0;
+let isLoadingMore = false; // 是否正在加载下一批
+let hasMorePapers = false; // 是否还有更多批次
+let currentRangeStart = null;
+let currentRangeEnd = null;
+let isDateRangeActive = false;
+let infiniteScrollObserver = null;
 
 // 加载用户的关键词设置
 function loadUserKeywords() {
@@ -389,6 +401,9 @@ document.addEventListener('DOMContentLoaded', () => {
   urlJsonParam = getJsonParam();
   urlAuthorParam = getUrlAuthor();
   urlKeywordsParam = getUrlKeywords();
+
+  // 初始化触底加载监听
+  setupInfiniteScroll();
 
   fetchAvailableDates().then(() => {
     if (availableDates.length > 0) {
@@ -824,6 +839,16 @@ function toggleRangeMode() {
 
 async function loadPapersByDate(date) {
   currentDate = date;
+  isDateRangeActive = false;
+  currentRangeStart = null;
+  currentRangeEnd = null;
+  currentPage = 1;
+  paperData = [];
+  totalPapersCount = 0;
+  totalPages = 1;
+  hasMorePapers = false;
+  isLoadingMore = false;
+  
   document.getElementById('currentDate').textContent = formatDate(date);
   
   // 更新日期选择器中的选中日期
@@ -831,22 +856,29 @@ async function loadPapersByDate(date) {
     flatpickrInstance.setDate(date, false);
   }
   
-  // 不再重置激活的关键词和作者
-  // 而是保持当前选择状态
-  
   const container = document.getElementById('paperContainer');
+  updateSentinelStatus();
+
   container.innerHTML = `
     <div class="loading-container">
       <div class="loading-spinner"></div>
-      <p>Loading paper...</p>
+      <p>Loading papers...</p>
     </div>
   `;
   
   try {
     const selectedLanguage = selectLanguageForDate(date);
-    const dataUrl = DATA_CONFIG.getPapersUrl(date, selectedLanguage);
+    const hasJsonParams = urlCategoryParam !== null || urlJsonParam !== null || urlAuthorParam !== null || urlKeywordsParam !== null;
+
+    let dataUrl;
+    if (hasJsonParams) {
+      // JSON 模式获取全量
+      dataUrl = DATA_CONFIG.getPapersUrl(date, selectedLanguage);
+    } else {
+      dataUrl = DATA_CONFIG.getPapersUrl(date, selectedLanguage, currentPage, pageSize, currentCategory);
+    }
+
     const response = await Auth.fetchWithAuth(dataUrl);
-    // 如果文件不存在（例如返回 404），在论文展示区域提示没有论文
     if (!response.ok) {
       if (response.status === 404) {
         container.innerHTML = `
@@ -855,50 +887,64 @@ async function loadPapersByDate(date) {
           </div>
         `;
         paperData = [];
+        totalPapersCount = 0;
+        totalPages = 1;
+        hasMorePapers = false;
         renderCategoryFilter({ sortedCategories: [], categoryCounts: {} });
+        updateSentinelStatus();
         return;
       }
       throw new Error(`HTTP ${response.status}`);
     }
-    const papersArray = await response.json();
-    // 空文件也提示没有论文
-    if (!papersArray || papersArray.length === 0) {
+    const responseData = await response.json();
+
+    if (hasJsonParams) {
+      let papers = Array.isArray(responseData) 
+        ? responseData.map(p => normalizePaper(p, date)) 
+        : (responseData.items || []).map(p => normalizePaper(p, date));
+      const targetCategory = urlCategoryParam || urlJsonParam || 'all';
+      papers = getPapersByCategory(papers, targetCategory);
+      if (urlKeywordsParam || urlAuthorParam) {
+        papers = matchPapersByKeywordsOrAuthor(papers, urlKeywordsParam, urlAuthorParam);
+      }
+      papers = papers.filter(p => p.isMatched);
+      outputJsonData(papers, targetCategory);
+      return;
+    }
+
+    if (Array.isArray(responseData)) {
+      const allNormalized = responseData.map(p => normalizePaper(p, date));
+      const categories = getAllCategories(allNormalized);
+      renderCategoryFilter(categories);
+      totalPapersCount = allNormalized.length;
+      totalPages = Math.ceil(totalPapersCount / pageSize) || 1;
+      paperData = allNormalized.slice(0, pageSize);
+    } else {
+      paperData = (responseData.items || []).map(p => normalizePaper(p, date));
+      totalPapersCount = responseData.total !== undefined ? responseData.total : paperData.length;
+      totalPages = responseData.total_pages || 1;
+      renderCategoryFilter({
+        sortedCategories: responseData.categories || [],
+        categoryCounts: responseData.category_counts || {},
+        totalCount: responseData.total_all !== undefined ? responseData.total_all : totalPapersCount
+      });
+    }
+
+    hasMorePapers = currentPage < totalPages;
+
+    if (paperData.length === 0 && totalPapersCount === 0) {
       container.innerHTML = `
         <div class="loading-container">
           <p>No papers found for this date.</p>
         </div>
       `;
-      paperData = [];
-      renderCategoryFilter({ sortedCategories: [], categoryCounts: {} });
-      return;
-    }
-    
-    paperData = papersArray.map(p => normalizePaper(p, date));
-
-    const categories = getAllCategories(paperData);
-
-    renderCategoryFilter(categories);
-
-    // 如果URL中有category、json、author或keywords参数，直接返回JSON
-    const hasJsonParams = urlCategoryParam !== null || urlJsonParam !== null || urlAuthorParam !== null || urlKeywordsParam !== null;
-    if (hasJsonParams) {
-      // 获取基础论文列表（按category或all）
-      const targetCategory = urlCategoryParam || urlJsonParam || 'all';
-      let papers = getPapersByCategory(paperData, targetCategory);
-
-      // 应用keywords和author匹配（"或"关系）
-      if (urlKeywordsParam || urlAuthorParam) {
-        papers = matchPapersByKeywordsOrAuthor(papers, urlKeywordsParam, urlAuthorParam);
-      }
-
-      // JSON模式：只返回匹配的论文
-      papers = papers.filter(p => p.isMatched);
-
-      outputJsonData(papers, targetCategory);
+      updateSentinelStatus();
       return;
     }
 
     renderPapers();
+    updateSentinelStatus();
+    setupInfiniteScroll();
   } catch (error) {
     console.error('加载论文数据失败:', error);
     container.innerHTML = `
@@ -907,6 +953,7 @@ async function loadPapersByDate(date) {
         <p>Error messages: ${error.message}</p>
       </div>
     `;
+    updateSentinelStatus();
   }
 }
 
@@ -927,25 +974,31 @@ function getAllCategories(papers) {
     sortedCategories: categories.sort((a, b) => {
       return a.localeCompare(b);
     }),
-    categoryCounts: catePaperCount
+    categoryCounts: catePaperCount,
+    totalCount: Array.isArray(papers) ? papers.length : 0
   };
 }
 
 function renderCategoryFilter(categories) {
   const container = document.querySelector('.category-scroll');
-  const { sortedCategories, categoryCounts } = categories;
+  if (!container) return;
+
+  const sortedCategories = categories.sortedCategories || [];
+  const categoryCounts = categories.categoryCounts || {};
   
-  let totalPapers = 0;
-  Object.values(categoryCounts).forEach(count => {
-    totalPapers += count;
-  });
+  let totalPapers = categories.totalCount !== undefined ? categories.totalCount : 0;
+  if (!totalPapers) {
+    Object.values(categoryCounts).forEach(count => {
+      totalPapers += count;
+    });
+  }
   
   container.innerHTML = `
     <button class="category-button ${currentCategory === 'all' ? 'active' : ''}" data-category="all">All<span class="category-count">${totalPapers}</span></button>
   `;
   
   sortedCategories.forEach(category => {
-    const count = categoryCounts[category];
+    const count = categoryCounts[category] || 0;
     const button = document.createElement('button');
     button.className = `category-button ${category === currentCategory ? 'active' : ''}`;
     button.innerHTML = `${category}<span class="category-count">${count}</span>`;
@@ -957,9 +1010,12 @@ function renderCategoryFilter(categories) {
     container.appendChild(button);
   });
   
-  document.querySelector('.category-button[data-category="all"]').addEventListener('click', () => {
-    filterByCategory('all');
-  });
+  const allBtn = container.querySelector('.category-button[data-category="all"]');
+  if (allBtn) {
+    allBtn.addEventListener('click', () => {
+      filterByCategory('all');
+    });
+  }
 }
 
 function filterByCategory(category) {
@@ -990,7 +1046,12 @@ function filterByCategory(category) {
     behavior: 'smooth'
   });
   
-  renderPapers();
+  // 切换分类时重新拉取第 1 批
+  if (isDateRangeActive && currentRangeStart && currentRangeEnd) {
+    loadPapersByDateRange(currentRangeStart, currentRangeEnd);
+  } else {
+    loadPapersByDate(currentDate);
+  }
 }
 
 // 帮助函数：高亮文本中的匹配内容
@@ -1066,51 +1127,91 @@ function formatAuthorsForCard(authorsString, authorTerms = []) {
   return result.join(', ');
 }
 
-function renderPapers() {
-  const container = document.getElementById('paperContainer');
-  container.innerHTML = '';
-  container.className = `paper-container ${currentView === 'list' ? 'list-view' : ''}`;
+function createPaperCard(paper, globalIndex, clickIndex) {
+  const paperCard = document.createElement('div');
+  paperCard.className = `paper-card ${paper.isMatched ? 'matched-paper' : ''}`;
+  paperCard.dataset.id = paper.id || paper.url;
   
-  let papers = getPapersByCategory(paperData, currentCategory);
+  if (paper.isMatched && paper.matchReason) {
+    paperCard.title = `匹配: ${Array.isArray(paper.matchReason) ? paper.matchReason.join(' | ') : paper.matchReason}`;
+  }
   
-  // 创建匹配论文的集合
-  let filteredPapers = [...papers];
+  const categoryTags = paper.allCategories ? 
+    paper.allCategories.map(cat => `<span class="category-tag">${cat}</span>`).join('') : 
+    `<span class="category-tag">${paper.category}</span>`;
+  
+  const titleSummaryTerms = [];
+  if (activeKeywords.length > 0) {
+    titleSummaryTerms.push(...activeKeywords);
+  }
+  if (textSearchQuery && textSearchQuery.trim().length > 0) {
+    titleSummaryTerms.push(textSearchQuery.trim());
+  }
 
-  // 重置所有论文的匹配状态，避免上次渲染的残留
-  filteredPapers.forEach(p => {
+  const highlightedTitle = titleSummaryTerms.length > 0 
+    ? highlightMatches(paper.title, titleSummaryTerms, 'keyword-highlight') 
+    : paper.title;
+  const highlightedSummary = titleSummaryTerms.length > 0 
+    ? highlightMatches(paper.summary, titleSummaryTerms, 'keyword-highlight') 
+    : paper.summary;
+
+  const authorTerms = [];
+  if (activeAuthors.length > 0) authorTerms.push(...activeAuthors);
+  if (textSearchQuery && textSearchQuery.trim().length > 0) authorTerms.push(textSearchQuery.trim());
+  
+  const formattedAuthors = formatAuthorsForCard(paper.authors, authorTerms);
+
+  paperCard.innerHTML = `
+    <div class="paper-card-index">${globalIndex}</div>
+    ${paper.isMatched ? '<div class="match-badge" title="匹配您的搜索条件"></div>' : ''}
+    <div class="paper-card-header">
+      <h3 class="paper-card-title">
+        ${highlightedTitle}
+        ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${escapeHtml(paper.translated_title)}</div>` : ''}
+      </h3>
+      <p class="paper-card-authors">${formattedAuthors}</p>
+      <div class="paper-card-categories">
+        ${categoryTags}
+      </div>
+    </div>
+    <div class="paper-card-body">
+      <p class="paper-card-summary">${highlightedSummary}</p>
+      <div class="paper-card-footer">
+        <div class="footer-left">
+          <span class="paper-card-date">${formatDate(paper.date)}</span>
+        </div>
+        <span class="paper-card-link">Details</span>
+      </div>
+    </div>
+  `;
+  
+  paperCard.addEventListener('click', () => {
+    currentPaperIndex = clickIndex;
+    showPaperDetails(paper, globalIndex);
+  });
+  
+  return paperCard;
+}
+
+// 对论文数组应用过滤和匹配标记
+function processPapersMatching(papers) {
+  let filtered = [...papers];
+
+  filtered.forEach(p => {
     p.isMatched = false;
     p.matchReason = undefined;
   });
 
-  // 文本搜索优先：当存在非空文本时，像关键词/作者一样只排序不隐藏
   if (textSearchQuery && textSearchQuery.trim().length > 0) {
     const q = textSearchQuery.toLowerCase();
-
-    // 排序：匹配的排前
-    filteredPapers.sort((a, b) => {
+    filtered.sort((a, b) => {
       const hayA = [
-        a.title,
-        a.authors,
-        Array.isArray(a.category) ? a.category.join(', ') : a.category,
-        a.summary,
-        a.details || '',
-        a.motivation || '',
-        a.method || '',
-        a.result || '',
-        a.conclusion || '',
-        a.remote_sensing_cross || ''
+        a.title, a.authors, Array.isArray(a.category) ? a.category.join(', ') : a.category,
+        a.summary, a.details || '', a.motivation || '', a.method || '', a.result || '', a.conclusion || '', a.remote_sensing_cross || ''
       ].join(' ').toLowerCase();
       const hayB = [
-        b.title,
-        b.authors,
-        Array.isArray(b.category) ? b.category.join(', ') : b.category,
-        b.summary,
-        b.details || '',
-        b.motivation || '',
-        b.method || '',
-        b.result || '',
-        b.conclusion || '',
-        b.remote_sensing_cross || ''
+        b.title, b.authors, Array.isArray(b.category) ? b.category.join(', ') : b.category,
+        b.summary, b.details || '', b.motivation || '', b.method || '', b.result || '', b.conclusion || '', b.remote_sensing_cross || ''
       ].join(' ').toLowerCase();
       const am = hayA.includes(q);
       const bm = hayB.includes(q);
@@ -1119,110 +1220,76 @@ function renderPapers() {
       return 0;
     });
 
-    // 标记匹配项，用于卡片样式与提示
-    filteredPapers.forEach(p => {
+    filtered.forEach(p => {
       const hay = [
-        p.title,
-        p.authors,
-        Array.isArray(p.category) ? p.category.join(', ') : p.category,
-        p.summary,
-        p.details || '',
-        p.motivation || '',
-        p.method || '',
-        p.result || '',
-        p.conclusion || '',
-        p.remote_sensing_cross || ''
+        p.title, p.authors, Array.isArray(p.category) ? p.category.join(', ') : p.category,
+        p.summary, p.details || '', p.motivation || '', p.method || '', p.result || '', p.conclusion || '', p.remote_sensing_cross || ''
       ].join(' ').toLowerCase();
       const matched = hay.includes(q);
       p.isMatched = matched;
       p.matchReason = matched ? [`文本: ${textSearchQuery}`] : undefined;
     });
-  } else {
-    // 关键词和作者匹配，但不过滤，只排序
-    if (activeKeywords.length > 0 || activeAuthors.length > 0) {
-      // 对论文进行排序，将匹配的论文放在前面
-      filteredPapers.sort((a, b) => {
-        const aMatchesKeyword = activeKeywords.length > 0 ? 
-          activeKeywords.some(keyword => {
-            // 仅在标题和摘要中搜索关键词
-            const searchText = `${a.title} ${a.summary}`.toLowerCase();
-            return searchText.includes(keyword.toLowerCase());
-          }) : false;
-          
-        const aMatchesAuthor = activeAuthors.length > 0 ?
-          activeAuthors.some(author => {
-            // 仅在作者中搜索作者名
-            return a.authors.toLowerCase().includes(author.toLowerCase());
-          }) : false;
-          
-        const bMatchesKeyword = activeKeywords.length > 0 ?
-          activeKeywords.some(keyword => {
-            // 仅在标题和摘要中搜索关键词
-            const searchText = `${b.title} ${b.summary}`.toLowerCase();
-            return searchText.includes(keyword.toLowerCase());
-          }) : false;
-          
-        const bMatchesAuthor = activeAuthors.length > 0 ?
-          activeAuthors.some(author => {
-            // 仅在作者中搜索作者名
-            return b.authors.toLowerCase().includes(author.toLowerCase());
-          }) : false;
+  } else if (activeKeywords.length > 0 || activeAuthors.length > 0) {
+    filtered.sort((a, b) => {
+      const aMatchesKeyword = activeKeywords.length > 0 ? 
+        activeKeywords.some(keyword => `${a.title} ${a.summary}`.toLowerCase().includes(keyword.toLowerCase())) : false;
+      const aMatchesAuthor = activeAuthors.length > 0 ?
+        activeAuthors.some(author => a.authors.toLowerCase().includes(author.toLowerCase())) : false;
+      const bMatchesKeyword = activeKeywords.length > 0 ?
+        activeKeywords.some(keyword => `${b.title} ${b.summary}`.toLowerCase().includes(keyword.toLowerCase())) : false;
+      const bMatchesAuthor = activeAuthors.length > 0 ?
+        activeAuthors.some(author => b.authors.toLowerCase().includes(author.toLowerCase())) : false;
+    
+      const aMatches = aMatchesKeyword || aMatchesAuthor;
+      const bMatches = bMatchesKeyword || bMatchesAuthor;
       
-        // a和b的匹配状态（关键词或作者匹配都算）
-        const aMatches = aMatchesKeyword || aMatchesAuthor;
-        const bMatches = bMatchesKeyword || bMatchesAuthor;
+      if (aMatches && !bMatches) return -1;
+      if (!aMatches && bMatches) return 1;
+      return 0;
+    });
+    
+    filtered.forEach(paper => {
+      const matchesKeyword = activeKeywords.length > 0 ?
+        activeKeywords.some(keyword => `${paper.title} ${paper.summary}`.toLowerCase().includes(keyword.toLowerCase())) : false;
+      const matchesAuthor = activeAuthors.length > 0 ?
+        activeAuthors.some(author => paper.authors.toLowerCase().includes(author.toLowerCase())) : false;
         
-        if (aMatches && !bMatches) return -1;
-        if (!aMatches && bMatches) return 1;
-        return 0;
-      });
+      paper.isMatched = matchesKeyword || matchesAuthor;
       
-      // 标记匹配的论文
-      filteredPapers.forEach(paper => {
-        const matchesKeyword = activeKeywords.length > 0 ?
-          activeKeywords.some(keyword => {
-            const searchText = `${paper.title} ${paper.summary}`.toLowerCase();
-            return searchText.includes(keyword.toLowerCase());
-          }) : false;
-          
-        const matchesAuthor = activeAuthors.length > 0 ?
-          activeAuthors.some(author => {
-            return paper.authors.toLowerCase().includes(author.toLowerCase());
-          }) : false;
-          
-        // 添加匹配标记（用于后续高亮整个论文卡片）
-        paper.isMatched = matchesKeyword || matchesAuthor;
-        
-        // 添加匹配原因（用于显示匹配提示）
-        if (paper.isMatched) {
-          paper.matchReason = [];
-          if (matchesKeyword) {
-            const matchedKeywords = activeKeywords.filter(keyword => 
-              `${paper.title} ${paper.summary}`.toLowerCase().includes(keyword.toLowerCase())
-            );
-            if (matchedKeywords.length > 0) {
-              paper.matchReason.push(`关键词: ${matchedKeywords.join(', ')}`);
-            }
-          }
-          if (matchesAuthor) {
-            const matchedAuthors = activeAuthors.filter(author => 
-              paper.authors.toLowerCase().includes(author.toLowerCase())
-            );
-            if (matchedAuthors.length > 0) {
-              paper.matchReason.push(`作者: ${matchedAuthors.join(', ')}`);
-            }
+      if (paper.isMatched) {
+        paper.matchReason = [];
+        if (matchesKeyword) {
+          const matchedKeywords = activeKeywords.filter(keyword => 
+            `${paper.title} ${paper.summary}`.toLowerCase().includes(keyword.toLowerCase())
+          );
+          if (matchedKeywords.length > 0) {
+            paper.matchReason.push(`关键词: ${matchedKeywords.join(', ')}`);
           }
         }
-      });
-    }
+        if (matchesAuthor) {
+          const matchedAuthors = activeAuthors.filter(author => 
+            paper.authors.toLowerCase().includes(author.toLowerCase())
+          );
+          if (matchedAuthors.length > 0) {
+            paper.matchReason.push(`作者: ${matchedAuthors.join(', ')}`);
+          }
+        }
+      }
+    });
   }
-  
 
+  return filtered;
+}
+
+function renderPapers() {
+  const container = document.getElementById('paperContainer');
+  container.innerHTML = '';
+  container.className = `paper-container ${currentView === 'list' ? 'list-view' : ''}`;
   
-  // 存储当前过滤后的论文列表，用于箭头键导航
-  currentFilteredPapers = [...filteredPapers];
+  let papers = getPapersByCategory(paperData, currentCategory);
+  currentFilteredPapers = processPapersMatching(papers);
   
-  if (filteredPapers.length === 0) {
+  if (currentFilteredPapers.length === 0) {
     container.innerHTML = `
       <div class="loading-container">
         <p>No paper found.</p>
@@ -1231,78 +1298,25 @@ function renderPapers() {
     return;
   }
   
-  filteredPapers.forEach((paper, index) => {
-    const paperCard = document.createElement('div');
-    // 添加匹配高亮类
-    paperCard.className = `paper-card ${paper.isMatched ? 'matched-paper' : ''}`;
-    paperCard.dataset.id = paper.id || paper.url;
-    
-    if (paper.isMatched) {
-      // 添加匹配原因提示
-      paperCard.title = `匹配: ${paper.matchReason.join(' | ')}`;
-    }
-    
-    const categoryTags = paper.allCategories ? 
-      paper.allCategories.map(cat => `<span class="category-tag">${cat}</span>`).join('') : 
-      `<span class="category-tag">${paper.category}</span>`;
-    
-    // 组合需要高亮的词：关键词 + 文本搜索
-    const titleSummaryTerms = [];
-    if (activeKeywords.length > 0) {
-      titleSummaryTerms.push(...activeKeywords);
-    }
-    if (textSearchQuery && textSearchQuery.trim().length > 0) {
-      titleSummaryTerms.push(textSearchQuery.trim());
-    }
+  currentFilteredPapers.forEach((paper, index) => {
+    const card = createPaperCard(paper, index + 1, index);
+    container.appendChild(card);
+  });
+}
 
-    // 高亮标题和摘要（关键词与文本搜索）
-    const highlightedTitle = titleSummaryTerms.length > 0 
-      ? highlightMatches(paper.title, titleSummaryTerms, 'keyword-highlight') 
-      : paper.title;
-    const highlightedSummary = titleSummaryTerms.length > 0 
-      ? highlightMatches(paper.summary, titleSummaryTerms, 'keyword-highlight') 
-      : paper.summary;
+// 触底时追加渲染新一批卡片
+function appendPaperCards(newRawPapers, startIndex) {
+  const container = document.getElementById('paperContainer');
+  if (!container) return;
 
-    // 高亮作者（作者过滤 + 文本搜索）
-    const authorTerms = [];
-    if (activeAuthors.length > 0) authorTerms.push(...activeAuthors);
-    if (textSearchQuery && textSearchQuery.trim().length > 0) authorTerms.push(textSearchQuery.trim());
-    
-    // 格式化作者列表（应用截断规则和高亮）
-    const formattedAuthors = formatAuthorsForCard(paper.authors, authorTerms);
-    
-
-
-    paperCard.innerHTML = `
-      <div class="paper-card-index">${index + 1}</div>
-      ${paper.isMatched ? '<div class="match-badge" title="匹配您的搜索条件"></div>' : ''}
-      <div class="paper-card-header">
-        <h3 class="paper-card-title">
-          ${highlightedTitle}
-          ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${escapeHtml(paper.translated_title)}</div>` : ''}
-        </h3>
-        <p class="paper-card-authors">${formattedAuthors}</p>
-        <div class="paper-card-categories">
-          ${categoryTags}
-        </div>
-      </div>
-      <div class="paper-card-body">
-        <p class="paper-card-summary">${highlightedSummary}</p>
-        <div class="paper-card-footer">
-          <div class="footer-left">
-            <span class="paper-card-date">${formatDate(paper.date)}</span>
-          </div>
-          <span class="paper-card-link">Details</span>
-        </div>
-      </div>
-    `;
-    
-    paperCard.addEventListener('click', () => {
-      currentPaperIndex = index; // 记录当前点击的论文索引
-      showPaperDetails(paper, index + 1);
-    });
-    
-    container.appendChild(paperCard);
+  const newProcessedPapers = processPapersMatching(newRawPapers);
+  
+  newProcessedPapers.forEach((paper, idx) => {
+    const globalIdx = startIndex + idx + 1;
+    const localIdx = startIndex + idx;
+    currentFilteredPapers.push(paper);
+    const card = createPaperCard(paper, globalIdx, localIdx);
+    container.appendChild(card);
   });
 }
 
@@ -1382,9 +1396,6 @@ function showPaperDetails(paper, paperIndex) {
     ? highlightMatches(paper.abstract_zh, modalTitleTerms, 'keyword-highlight') 
     : paper.abstract_zh;
   
-  // 判断是否需要显示高亮说明
-  const showHighlightLegend = activeKeywords.length > 0 || activeAuthors.length > 0;
-  
   // 添加匹配标记
   const matchedPaperClass = paper.isMatched ? 'matched-paper-details' : '';
   
@@ -1393,7 +1404,6 @@ function showPaperDetails(paper, paperIndex) {
       <p><strong>Authors: </strong>${highlightedAuthors}</p>
       <p><strong>Categories: </strong>${categoryDisplay}</p>
       <p><strong>Date: </strong>${formatDate(paper.date)}</p>
-      
       
       <h3>TL;DR</h3>
       <p>${highlightedSummary}</p>
@@ -1434,16 +1444,16 @@ function showPaperDetails(paper, paperIndex) {
   document.getElementById('pdfLink').href = paper.url.replace('abs', 'pdf');
   document.getElementById('htmlLink').href = paper.url.replace('abs', 'html');
   
-
-
   // 提示词来自：https://papers.cool/
   prompt = `请你阅读这篇文章${paper.url.replace('abs', 'pdf')},总结一下这篇文章解决的问题、相关工作、研究方法、做了什么实验及其结果、结论，最后整体总结一下这篇文章的内容`
   document.getElementById('kimiChatLink').href = `https://www.kimi.com/_prefill_chat?prefill_prompt=${prompt}&system_prompt=你是一个学术助手，后面的对话将围绕着以下论文内容进行，已经通过链接给出了论文的PDF和论文已有的FAQ。用户将继续向你咨询论文的相关问题，请你作出专业的回答，不要出现第一人称，当涉及到分点回答时，鼓励你以markdown格式输出。&send_immediately=true&force_search=true`;
   
   // 更新论文位置信息
   const paperPosition = document.getElementById('paperPosition');
-  if (paperPosition && currentFilteredPapers.length > 0) {
-    paperPosition.textContent = `${currentPaperIndex + 1} / ${currentFilteredPapers.length}`;
+  if (paperPosition) {
+    const currentGlobalNum = paperIndex || (currentPaperIndex + 1);
+    const totalCount = totalPapersCount || currentFilteredPapers.length;
+    paperPosition.textContent = `${currentGlobalNum} / ${totalCount}`;
   }
   
   modal.classList.add('active');
@@ -1454,9 +1464,7 @@ function closeModal() {
   const modal = document.getElementById('paperModal');
   const modalBody = document.getElementById('modalBody');
   
-  // 重置模态框的滚动位置
   modalBody.scrollTop = 0;
-  
   modal.classList.remove('active');
   document.body.style.overflow = '';
 }
@@ -1470,56 +1478,58 @@ function navigateToPreviousPaper() {
   showPaperDetails(paper, currentPaperIndex + 1);
 }
 
-// 导航到下一篇论文
-function navigateToNextPaper() {
+// 导航到下一篇论文（支持若到末尾自动加载下一批）
+async function navigateToNextPaper() {
   if (currentFilteredPapers.length === 0) return;
   
-  currentPaperIndex = currentPaperIndex < currentFilteredPapers.length - 1 ? currentPaperIndex + 1 : 0;
-  const paper = currentFilteredPapers[currentPaperIndex];
-  showPaperDetails(paper, currentPaperIndex + 1);
+  if (currentPaperIndex < currentFilteredPapers.length - 1) {
+    currentPaperIndex++;
+    const paper = currentFilteredPapers[currentPaperIndex];
+    showPaperDetails(paper, currentPaperIndex + 1);
+  } else if (hasMorePapers) {
+    // 到底部了，自动触底拉取下一批
+    await loadMorePapers();
+    if (currentPaperIndex < currentFilteredPapers.length - 1) {
+      currentPaperIndex++;
+      const paper = currentFilteredPapers[currentPaperIndex];
+      showPaperDetails(paper, currentPaperIndex + 1);
+    }
+  } else {
+    // 循环回第 1 篇
+    currentPaperIndex = 0;
+    const paper = currentFilteredPapers[0];
+    showPaperDetails(paper, 1);
+  }
 }
 
 // 显示随机论文
 function showRandomPaper() {
-  // 检查是否有可用的论文
   if (currentFilteredPapers.length === 0) {
     console.log('No papers available to show random paper');
     return;
   }
   
-  // 生成随机索引
   const randomIndex = Math.floor(Math.random() * currentFilteredPapers.length);
   const randomPaper = currentFilteredPapers[randomIndex];
   
-  // 更新当前论文索引
   currentPaperIndex = randomIndex;
-  
-  // 显示随机论文
   showPaperDetails(randomPaper, currentPaperIndex + 1);
-  
-  // 显示随机论文指示器
   showRandomPaperIndicator();
-  
-  console.log(`Showing random paper: ${randomIndex + 1}/${currentFilteredPapers.length}`);
 }
 
 // 显示随机论文指示器
 function showRandomPaperIndicator() {
-  // 移除已存在的指示器
   const existingIndicator = document.querySelector('.random-paper-indicator');
   if (existingIndicator) {
     existingIndicator.remove();
   }
   
-  // 创建新的指示器
   const indicator = document.createElement('div');
   indicator.className = 'random-paper-indicator';
   indicator.textContent = 'Random Paper';
   
-  // 添加到页面
   document.body.appendChild(indicator);
   
-  // 3秒后自动移除
   setTimeout(() => {
     if (indicator && indicator.parentNode) {
       indicator.remove();
@@ -1558,23 +1568,22 @@ function formatDate(dateString) {
 }
 
 async function loadPapersByDateRange(startDate, endDate) {
-  // 获取日期范围内的所有有效日期
-  const validDatesInRange = availableDates.filter(date => {
-    return date >= startDate && date <= endDate;
-  });
-  
-  if (validDatesInRange.length === 0) {
-    alert('No available papers in the selected date range.');
-    return;
-  }
-  
+  isDateRangeActive = true;
+  currentRangeStart = startDate;
+  currentRangeEnd = endDate;
+  currentPage = 1;
+  paperData = [];
+  totalPapersCount = 0;
+  totalPages = 1;
+  hasMorePapers = false;
+  isLoadingMore = false;
+
   currentDate = `${startDate} to ${endDate}`;
   document.getElementById('currentDate').textContent = `${formatDate(startDate)} - ${formatDate(endDate)}`;
   
-  // 不再重置激活的关键词和作者
-  // 而是保持当前选择状态
-  
   const container = document.getElementById('paperContainer');
+  updateSentinelStatus();
+
   container.innerHTML = `
     <div class="loading-container">
       <div class="loading-spinner"></div>
@@ -1583,49 +1592,84 @@ async function loadPapersByDateRange(startDate, endDate) {
   `;
   
   try {
-    let allPapers = [];
-    
-    for (const date of validDatesInRange) {
-      const selectedLanguage = selectLanguageForDate(date);
-      const dataUrl = DATA_CONFIG.getPapersUrl(date, selectedLanguage);
-      const response = await Auth.fetchWithAuth(dataUrl);
-      if (!response.ok) {
-        console.warn(`Data for ${date} not found, skipping.`);
-        continue;
-      }
-      const dataPapers = await response.json();
-      if (Array.isArray(dataPapers)) {
-        const normalized = dataPapers.map(p => normalizePaper(p, date));
-        allPapers = allPapers.concat(normalized);
-      }
-    }
-    
-    paperData = allPapers;
-
-    const categories = getAllCategories(paperData);
-
-    renderCategoryFilter(categories);
-
-    // 如果URL中有category、json、author或keywords参数，直接返回JSON
+    const selectedLanguage = selectLanguageForDate(startDate);
     const hasJsonParams = urlCategoryParam !== null || urlJsonParam !== null || urlAuthorParam !== null || urlKeywordsParam !== null;
-    if (hasJsonParams) {
-      // 获取基础论文列表（按category或all）
-      const targetCategory = urlCategoryParam || urlJsonParam || 'all';
-      let papers = getPapersByCategory(paperData, targetCategory);
 
-      // 应用keywords和author匹配（"或"关系）
+    let dataUrl;
+    if (hasJsonParams) {
+      dataUrl = DATA_CONFIG.getPapersRangeUrl(startDate, endDate, selectedLanguage);
+    } else {
+      dataUrl = DATA_CONFIG.getPapersRangeUrl(startDate, endDate, selectedLanguage, currentPage, pageSize, currentCategory);
+    }
+
+    const response = await Auth.fetchWithAuth(dataUrl);
+    if (!response.ok) {
+      if (response.status === 404) {
+        container.innerHTML = `
+          <div class="loading-container">
+            <p>No papers found in the selected date range.</p>
+          </div>
+        `;
+        paperData = [];
+        totalPapersCount = 0;
+        totalPages = 1;
+        hasMorePapers = false;
+        renderCategoryFilter({ sortedCategories: [], categoryCounts: {} });
+        updateSentinelStatus();
+        return;
+      }
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const responseData = await response.json();
+
+    if (hasJsonParams) {
+      let papers = Array.isArray(responseData) 
+        ? responseData.map(p => normalizePaper(p, p.date)) 
+        : (responseData.items || []).map(p => normalizePaper(p, p.date));
+      const targetCategory = urlCategoryParam || urlJsonParam || 'all';
+      papers = getPapersByCategory(papers, targetCategory);
       if (urlKeywordsParam || urlAuthorParam) {
         papers = matchPapersByKeywordsOrAuthor(papers, urlKeywordsParam, urlAuthorParam);
       }
-
-      // JSON模式：只返回匹配的论文
       papers = papers.filter(p => p.isMatched);
-
       outputJsonData(papers, targetCategory);
       return;
     }
 
+    if (Array.isArray(responseData)) {
+      const allNormalized = responseData.map(p => normalizePaper(p, p.date));
+      const categories = getAllCategories(allNormalized);
+      renderCategoryFilter(categories);
+      totalPapersCount = allNormalized.length;
+      totalPages = Math.ceil(totalPapersCount / pageSize) || 1;
+      paperData = allNormalized.slice(0, pageSize);
+    } else {
+      paperData = (responseData.items || []).map(p => normalizePaper(p, p.date));
+      totalPapersCount = responseData.total !== undefined ? responseData.total : paperData.length;
+      totalPages = responseData.total_pages || 1;
+      renderCategoryFilter({
+        sortedCategories: responseData.categories || [],
+        categoryCounts: responseData.category_counts || {},
+        totalCount: responseData.total_all !== undefined ? responseData.total_all : totalPapersCount
+      });
+    }
+
+    hasMorePapers = currentPage < totalPages;
+
+    if (paperData.length === 0 && totalPapersCount === 0) {
+      container.innerHTML = `
+        <div class="loading-container">
+          <p>No papers found in the selected date range.</p>
+        </div>
+      `;
+      updateSentinelStatus();
+      return;
+    }
+
     renderPapers();
+    updateSentinelStatus();
+    setupInfiniteScroll();
   } catch (error) {
     console.error('加载论文数据失败:', error);
     container.innerHTML = `
@@ -1634,6 +1678,116 @@ async function loadPapersByDateRange(startDate, endDate) {
         <p>Error messages: ${error.message}</p>
       </div>
     `;
+    updateSentinelStatus();
+  }
+}
+
+// 加载更多论文（触底追加）
+async function loadMorePapers() {
+  if (isLoadingMore || !hasMorePapers || isJsonMode()) return;
+  isLoadingMore = true;
+
+  const loadingEl = document.getElementById('infiniteScrollLoading');
+  const endEl = document.getElementById('infiniteScrollEnd');
+  if (loadingEl) loadingEl.style.display = 'flex';
+  if (endEl) endEl.style.display = 'none';
+
+  const nextPage = currentPage + 1;
+
+  try {
+    const selectedLanguage = selectLanguageForDate(isDateRangeActive ? currentRangeStart : currentDate);
+    let dataUrl;
+    if (isDateRangeActive && currentRangeStart && currentRangeEnd) {
+      dataUrl = DATA_CONFIG.getPapersRangeUrl(currentRangeStart, currentRangeEnd, selectedLanguage, nextPage, pageSize, currentCategory);
+    } else {
+      dataUrl = DATA_CONFIG.getPapersUrl(currentDate, selectedLanguage, nextPage, pageSize, currentCategory);
+    }
+
+    const response = await Auth.fetchWithAuth(dataUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const responseData = await response.json();
+    let newItems = [];
+    if (Array.isArray(responseData)) {
+      newItems = responseData.slice((nextPage - 1) * pageSize, nextPage * pageSize).map(p => normalizePaper(p, p.date || currentDate));
+    } else {
+      newItems = (responseData.items || []).map(p => normalizePaper(p, p.date || currentDate));
+      totalPages = responseData.total_pages || totalPages;
+    }
+
+    if (newItems.length > 0) {
+      const startIndex = paperData.length;
+      paperData = paperData.concat(newItems);
+      currentPage = nextPage;
+      hasMorePapers = currentPage < totalPages;
+      appendPaperCards(newItems, startIndex);
+    } else {
+      hasMorePapers = false;
+    }
+  } catch (error) {
+    console.error('加载更多论文失败:', error);
+  } finally {
+    isLoadingMore = false;
+    updateSentinelStatus();
+  }
+}
+
+// 更新底部哨兵元素与提示状态
+function updateSentinelStatus() {
+  const loadingEl = document.getElementById('infiniteScrollLoading');
+  const endEl = document.getElementById('infiniteScrollEnd');
+  const endText = document.getElementById('infiniteScrollEndText');
+
+  if (loadingEl) loadingEl.style.display = isLoadingMore ? 'flex' : 'none';
+  
+  if (endEl) {
+    if (!hasMorePapers && paperData.length > 0) {
+      endEl.style.display = 'flex';
+      if (endText) {
+        endText.textContent = `All ${totalPapersCount || paperData.length} papers loaded`;
+      }
+    } else {
+      endEl.style.display = 'none';
+    }
+  }
+}
+
+// 初始化 IntersectionObserver 监听触底哨兵
+function setupInfiniteScroll() {
+  if (infiniteScrollObserver) {
+    infiniteScrollObserver.disconnect();
+  }
+
+  const sentinel = document.getElementById('infiniteScrollSentinel');
+  if (!sentinel) return;
+
+  if ('IntersectionObserver' in window) {
+    infiniteScrollObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && hasMorePapers && !isLoadingMore) {
+          loadMorePapers();
+        }
+      });
+    }, {
+      root: null,
+      rootMargin: '400px', // 提前400px，用户滑动到底部时无缝平滑呈现
+      threshold: 0.01
+    });
+
+    infiniteScrollObserver.observe(sentinel);
+  } else {
+    // 兼容老旧浏览器的 scroll 事件监听
+    window.addEventListener('scroll', () => {
+      if (isLoadingMore || !hasMorePapers) return;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const clientHeight = window.innerHeight;
+      if (scrollTop + clientHeight >= scrollHeight - 400) {
+        loadMorePapers();
+      }
+    });
   }
 }
 
@@ -1690,3 +1844,4 @@ function togglePdfSize(button) {
     });
   }
 }
+

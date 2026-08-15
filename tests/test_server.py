@@ -546,4 +546,146 @@ def test_keyword_growth_rate_ols():
         server.ACCESS_PASSWORD = old_password
 
 
+def test_papers_pagination():
+    import server
+    old_password = server.ACCESS_PASSWORD
+    server.ACCESS_PASSWORD = "testpassword"
+    
+    # 登录获取 token
+    login_resp = client.post("/api/auth/login", json={"password": "testpassword"})
+    token = login_resp.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    test_file = "data/2026-07-20_AI_enhanced_Chinese.jsonl"
+    os.makedirs("data", exist_ok=True)
+    
+    # 写入 5 篇测试论文
+    with open(test_file, "w", encoding="utf-8") as f:
+        for i in range(1, 6):
+            cat = "cs.CV" if i <= 3 else "cs.AI"
+            author = "Alice" if i % 2 == 1 else "Bob"
+            f.write(json.dumps({
+                "id": f"paper_{i}",
+                "title": f"Paper Title {i}",
+                "authors": [author],
+                "categories": [cat],
+                "summary": f"Summary of paper {i} with machine learning content.",
+                "AI": {
+                    "translated_title": f"论文标题 {i}",
+                    "tldr": f"TLDR {i}"
+                }
+            }) + "\n")
+            
+    try:
+        # 1. 不传 page 参数：应该返回全量列表 5 条（向下兼容）
+        resp_full = client.get("/api/papers?date=2026-07-20&lang=Chinese", headers=headers)
+        assert resp_full.status_code == 200
+        data_full = resp_full.json()
+        assert isinstance(data_full, list)
+        assert len(data_full) == 5
+
+        # 2. 传 page=1, page_size=2：返回第 1 页 2 条，total=5, total_pages=3
+        resp_p1 = client.get("/api/papers?date=2026-07-20&lang=Chinese&page=1&page_size=2", headers=headers)
+        assert resp_p1.status_code == 200
+        data_p1 = resp_p1.json()
+        assert isinstance(data_p1, dict)
+        assert data_p1["total"] == 5
+        assert data_p1["page"] == 1
+        assert data_p1["page_size"] == 2
+        assert data_p1["total_pages"] == 3
+        assert len(data_p1["items"]) == 2
+        assert data_p1["items"][0]["id"] == "paper_1"
+        assert data_p1["items"][1]["id"] == "paper_2"
+        assert "cs.CV" in data_p1["category_counts"]
+        assert data_p1["category_counts"]["cs.CV"] == 3
+        assert data_p1["category_counts"]["cs.AI"] == 2
+
+        # 3. 传 page=3, page_size=2：返回最后一页 1 条
+        resp_p3 = client.get("/api/papers?date=2026-07-20&lang=Chinese&page=3&page_size=2", headers=headers)
+        assert resp_p3.status_code == 200
+        data_p3 = resp_p3.json()
+        assert len(data_p3["items"]) == 1
+        assert data_p3["items"][0]["id"] == "paper_5"
+
+        # 4. 传 category="cs.AI" 进行分页过滤
+        resp_cat = client.get("/api/papers?date=2026-07-20&lang=Chinese&page=1&page_size=10&category=cs.AI", headers=headers)
+        assert resp_cat.status_code == 200
+        data_cat = resp_cat.json()
+        assert data_cat["total"] == 2
+        assert len(data_cat["items"]) == 2
+        assert all("cs.AI" in p["categories"] for p in data_cat["items"])
+
+        # 5. 传 keyword 搜索过滤
+        resp_kw = client.get("/api/papers?date=2026-07-20&lang=Chinese&page=1&page_size=10&keyword=paper+1", headers=headers)
+        assert resp_kw.status_code == 200
+        data_kw = resp_kw.json()
+        assert data_kw["total"] == 1
+        assert data_kw["items"][0]["id"] == "paper_1"
+
+        # 6. 传 author 过滤
+        resp_author = client.get("/api/papers?date=2026-07-20&lang=Chinese&page=1&page_size=10&author=Alice", headers=headers)
+        assert resp_author.status_code == 200
+        data_author = resp_author.json()
+        assert data_author["total"] == 3
+    finally:
+        if os.path.exists(test_file):
+            try:
+                os.remove(test_file)
+            except Exception:
+                pass
+        server.ACCESS_PASSWORD = old_password
+
+
+def test_papers_range_pagination():
+    import server
+    old_password = server.ACCESS_PASSWORD
+    server.ACCESS_PASSWORD = "testpassword"
+    
+    # 登录获取 token
+    login_resp = client.post("/api/auth/login", json={"password": "testpassword"})
+    token = login_resp.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    test_file = "data/2026-07-21_AI_enhanced_Chinese.jsonl"
+    os.makedirs("data", exist_ok=True)
+    
+    with open(test_file, "w", encoding="utf-8") as f:
+        for i in range(1, 4):
+            f.write(json.dumps({
+                "id": f"range_paper_{i}",
+                "title": f"Range Paper Title {i}",
+                "authors": ["Carol"],
+                "categories": ["cs.CV"],
+                "summary": f"Summary {i}",
+                "AI": {"translated_title": f"范围论文 {i}"}
+            }) + "\n")
+            
+    try:
+        # 分页查询 range
+        resp = client.get("/api/papers/range?start_date=2026-07-21&end_date=2026-07-21&lang=Chinese&page=1&page_size=2", headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, dict)
+        assert data["total"] == 3
+        assert data["page"] == 1
+        assert data["page_size"] == 2
+        assert data["total_pages"] == 2
+        assert len(data["items"]) == 2
+
+        # 兼容模式：未传 page 返回 list
+        resp_full = client.get("/api/papers/range?start_date=2026-07-21&end_date=2026-07-21&lang=Chinese", headers=headers)
+        assert resp_full.status_code == 200
+        assert isinstance(resp_full.json(), list)
+        assert len(resp_full.json()) == 3
+    finally:
+        if os.path.exists(test_file):
+            try:
+                os.remove(test_file)
+            except Exception:
+                pass
+        server.ACCESS_PASSWORD = old_password
+
+
+
+
 

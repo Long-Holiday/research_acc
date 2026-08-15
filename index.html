@@ -163,6 +163,17 @@
                     <p>Loading papers...</p>
                 </div>
             </div>
+
+            <!-- Infinite Scroll Sentinel & Status Indicators -->
+            <div class="infinite-scroll-sentinel" id="infiniteScrollSentinel">
+                <div class="infinite-loading" id="infiniteScrollLoading" style="display: none;">
+                    <div class="loading-spinner small"></div>
+                    <span>Loading more papers...</span>
+                </div>
+                <div class="infinite-end" id="infiniteScrollEnd" style="display: none;">
+                    <span id="infiniteScrollEndText">All papers loaded</span>
+                </div>
+            </div>
         </main>
 
         <div class="paper-modal" id="paperModal">
