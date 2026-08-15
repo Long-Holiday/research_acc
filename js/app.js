@@ -34,7 +34,7 @@ let previousActiveAuthors = null; // 文本搜索激活时，暂存之前的作�
 
 // 触底加载/无限滚动状态管理
 let currentPage = 1;
-const pageSize = 20; // 每次加载 20 篇
+const pageSize = 21; // 每次加载 21 篇
 let totalPages = 1;
 let totalPapersCount = 0;
 let isLoadingMore = false; // 是否正在加载下一批

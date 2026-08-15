@@ -67,7 +67,7 @@ def get_papers(
         return papers
         
     # 分页模式处理
-    actual_page_size = page_size if page_size is not None else 20
+    actual_page_size = page_size if page_size is not None else 21
     actual_page_size = min(max(actual_page_size, 1), 100)
     actual_page = max(page, 1)
     
@@ -211,7 +211,7 @@ def get_papers_range(
             return papers
             
         # 分页模式处理
-        actual_page_size = page_size if page_size is not None else 20
+        actual_page_size = page_size if page_size is not None else 21
         actual_page_size = min(max(actual_page_size, 1), 100)
         actual_page = max(page, 1)
 
