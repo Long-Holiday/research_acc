@@ -1042,8 +1042,98 @@ function clearExcludeKeywords() {
   loadAndRenderNetwork(categoryParam);
 }
 
+async function reextractKeywords() {
+  const confirmed = confirm("确认要使用最新算法模型重新提取所有历史论文的关键词吗？\n该过程将重置并基于最新提取模型重建关键词索引与统计数据。");
+  if (!confirmed) return;
+
+  const btn = document.getElementById('reextractKeywordsBtn');
+  const textSpan = document.getElementById('reextractKeywordsText');
+  const icon = btn ? btn.querySelector('.reextract-btn-icon') : null;
+  const notice = document.getElementById('aiFilterStatusNotice');
+
+  if (btn) btn.disabled = true;
+  if (icon) icon.classList.add('spinning');
+  if (textSpan) textSpan.textContent = '准备提取...';
+  if (notice) {
+    notice.className = 'ai-filter-notice info';
+    notice.innerHTML = '<span><span class="ai-spinner-small" style="margin-right:6px;vertical-align:middle;border-color:rgba(30,64,175,0.3);border-top-color:#1e40af;"></span>正在启动关键词重新提取任务...</span>';
+    notice.style.display = 'flex';
+  }
+
+  try {
+    const triggerRes = await Auth.fetchWithAuth('/api/stats/reextract-keywords', {
+      method: 'POST'
+    });
+
+    if (!triggerRes.ok) {
+      const errJson = await triggerRes.json().catch(() => ({}));
+      throw new Error(errJson.detail || `请求失败 (${triggerRes.status})`);
+    }
+
+    // 轮询提取进度
+    let pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await Auth.fetchWithAuth('/api/stats/reextract-status');
+        if (!statusRes.ok) return;
+        const statusData = await statusRes.json();
+
+        if (statusData.status === 'running') {
+          const progress = statusData.progress || 0;
+          const current = statusData.current || 0;
+          const total = statusData.total || 0;
+          if (textSpan) textSpan.textContent = `提取中 (${progress}%)...`;
+          if (notice) {
+            notice.className = 'ai-filter-notice info';
+            notice.innerHTML = `<span><span class="ai-spinner-small" style="margin-right:6px;vertical-align:middle;border-color:rgba(30,64,175,0.3);border-top-color:#1e40af;"></span>${escapeHtml(statusData.message || `正在提取数据文件 (${current}/${total})...`)}</span>`;
+            notice.style.display = 'flex';
+          }
+        } else if (statusData.status === 'completed') {
+          clearInterval(pollInterval);
+          if (btn) btn.disabled = false;
+          if (icon) icon.classList.remove('spinning');
+          if (textSpan) textSpan.textContent = '重新提取关键词';
+          if (notice) {
+            notice.className = 'ai-filter-notice success';
+            notice.innerHTML = `<span>✨ ${escapeHtml(statusData.message || '关键词重新提取完成！已更新全部统计图表。')}</span><button type="button" onclick="this.parentElement.style.display='none'" style="background:none;border:none;cursor:pointer;color:inherit;font-size:14px;padding:0 4px;margin-left:8px;">✕</button>`;
+            notice.style.display = 'flex';
+            setTimeout(() => { if (notice) notice.style.display = 'none'; }, 6000);
+          }
+          // 重新刷新当前分类和日期的统计数据
+          if (window.renderCategoryStats && window.selectedCategories && window.validDatesInRange) {
+            window.renderCategoryStats(window.selectedCategories, window.validDatesInRange);
+          }
+        } else if (statusData.status === 'error') {
+          clearInterval(pollInterval);
+          if (btn) btn.disabled = false;
+          if (icon) icon.classList.remove('spinning');
+          if (textSpan) textSpan.textContent = '重新提取关键词';
+          if (notice) {
+            notice.className = 'ai-filter-notice error';
+            notice.innerHTML = `<span>❌ 重新提取失败: ${escapeHtml(statusData.error || statusData.message || '未知错误')}</span><button type="button" onclick="this.parentElement.style.display='none'" style="background:none;border:none;cursor:pointer;color:inherit;font-size:14px;padding:0 4px;margin-left:8px;">✕</button>`;
+            notice.style.display = 'flex';
+          }
+        }
+      } catch (err) {
+        console.error('轮询提取状态异常:', err);
+      }
+    }, 800);
+
+  } catch (error) {
+    console.error('触发重新提取关键词失败:', error);
+    if (btn) btn.disabled = false;
+    if (icon) icon.classList.remove('spinning');
+    if (textSpan) textSpan.textContent = '重新提取关键词';
+    if (notice) {
+      notice.className = 'ai-filter-notice error';
+      notice.innerHTML = `<span>❌ 启动重新提取失败: ${escapeHtml(error.message)}</span><button type="button" onclick="this.parentElement.style.display='none'" style="background:none;border:none;cursor:pointer;color:inherit;font-size:14px;padding:0 4px;margin-left:8px;">✕</button>`;
+      notice.style.display = 'flex';
+    }
+  }
+}
+
 window.aiFilterKeywords = aiFilterKeywords;
 window.clearExcludeKeywords = clearExcludeKeywords;
+window.reextractKeywords = reextractKeywords;
 
 
 window.updateTrendChart = function() {

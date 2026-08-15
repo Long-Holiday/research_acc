@@ -2,6 +2,7 @@ import os
 import re
 import json
 import math
+import threading
 from datetime import datetime, timedelta
 from typing import List, Optional
 from pydantic import BaseModel, Field
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.auth import verify_token
 from server_modules.database import connect_db
 from server_modules.processor import scan_and_process_files
+import server_modules.processor as processor
 from server_modules.analytics import community_detection
 from ai.keyword_filter import filter_meaningless_keywords
 import app.config as config
@@ -579,3 +581,26 @@ def ai_filter_keywords(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI Keyword Filtering failed: {str(e)}")
+
+
+@router.post("/api/stats/reextract-keywords")
+def trigger_reextract_keywords(token: str = Depends(verify_token)):
+    status = processor.get_reextract_status()
+    if status.get("status") == "running":
+        return {
+            "status": "running",
+            "message": "重新提取任务正在进行中",
+            "details": status
+        }
+        
+    thread = threading.Thread(target=processor.reextract_all_keywords, daemon=True)
+    thread.start()
+    return {
+        "status": "started",
+        "message": "已启动重新提取关键词任务"
+    }
+
+
+@router.get("/api/stats/reextract-status")
+def get_reextract_status(token: str = Depends(verify_token)):
+    return processor.get_reextract_status()

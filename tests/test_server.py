@@ -686,6 +686,85 @@ def test_papers_range_pagination():
         server.ACCESS_PASSWORD = old_password
 
 
+def test_reextract_keywords_api():
+    import server
+    import server_modules.processor as processor
+    import time
+
+    old_password = server.ACCESS_PASSWORD
+    server.ACCESS_PASSWORD = "testpassword"
+
+    old_server_db_path = server.DB_PATH
+    old_processor_db_path = processor.DB_PATH
+    server.DB_PATH = "data/test_statistics.db"
+    processor.DB_PATH = "data/test_statistics.db"
+
+    # 未认证测试
+    unauth_post = client.post("/api/stats/reextract-keywords")
+    assert unauth_post.status_code == 401
+    unauth_get = client.get("/api/stats/reextract-status")
+    assert unauth_get.status_code == 401
+
+    # 登录
+    login_resp = client.post("/api/auth/login", json={"password": "testpassword"})
+    assert login_resp.status_code == 200
+    token = login_resp.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 初始状态获取
+    status_resp = client.get("/api/stats/reextract-status", headers=headers)
+    assert status_resp.status_code == 200
+    assert "status" in status_resp.json()
+
+    # 构造测试数据
+    os.makedirs("data", exist_ok=True)
+    test_file = "data/2026-07-22_AI_enhanced_Chinese.jsonl"
+    with open(test_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "id": "reextract_p1",
+            "title": "Quantum Reinforcement Learning (QRL) Agents",
+            "summary": "We study Quantum Reinforcement Learning (QRL) for autonomous systems.",
+            "categories": ["cs.AI"]
+        }) + "\n")
+
+    try:
+        # 直接执行重新提取函数并验证
+        success = processor.reextract_all_keywords()
+        assert success is True
+
+        status = processor.get_reextract_status()
+        assert status["status"] == "completed"
+        assert status["progress"] == 100
+
+        # API 触发测试
+        trigger_resp = client.post("/api/stats/reextract-keywords", headers=headers)
+        assert trigger_resp.status_code == 200
+        assert trigger_resp.json()["status"] in ("started", "running")
+
+        # 检查重提取后关键词查询接口是否正常返回最新提取的词
+        time.sleep(0.5)
+        kw_resp = client.get(
+            "/api/stats/keywords?start_date=2026-07-22&end_date=2026-07-22&lang=Chinese&category=All",
+            headers=headers
+        )
+        assert kw_resp.status_code == 200
+        kw_data = kw_resp.json()
+        assert "keywords" in kw_data
+        kw_names = [k["keyword"] for k in kw_data["keywords"]]
+        # 应该识别出 "quantum reinforcement learning" 或 "qrl" 或 "reinforcement learning"
+        assert any("reinforcement" in name or "quantum" in name or "qrl" in name for name in kw_names)
+
+    finally:
+        if os.path.exists(test_file):
+            try:
+                os.remove(test_file)
+            except Exception:
+                pass
+        server.ACCESS_PASSWORD = old_password
+        server.DB_PATH = old_server_db_path
+        processor.DB_PATH = old_processor_db_path
+
+
 
 
 

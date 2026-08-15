@@ -169,6 +169,12 @@
                                         Select keywords to exclude
                                     </div>
                                     <div class="exclude-btn-group" style="display: flex; align-items: center; gap: 8px;">
+                                        <button id="reextractKeywordsBtn" class="reextract-keywords-btn" type="button" onclick="reextractKeywords()" title="使用最新模型重新提取所有历史论文的关键词并重建统计数据">
+                                            <svg class="reextract-btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M4 4V9H4.582M20 20V15H19.418M19.418 9A7.962 7.962 0 004.582 9M4.582 15A7.962 7.962 0 0019.418 15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                            <span id="reextractKeywordsText">重新提取关键词</span>
+                                        </button>
                                         <button id="aiFilterKeywordsBtn" class="ai-filter-keywords-btn" type="button" onclick="aiFilterKeywords()" title="使用大模型智能识别并排除无学术意义的泛化关键词">
                                             <svg class="ai-btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                                 <path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z" fill="currentColor"/>
