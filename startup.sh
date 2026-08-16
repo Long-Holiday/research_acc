@@ -16,42 +16,72 @@ cd "$(dirname "$0")"
 # 获取项目的绝对路径
 PROJECT_DIR="$(pwd)"
 
-# Cron 定时任务配置 (每天凌晨 4:09 自动执行)
-CRON_SCHEDULE="9 4 * * *"
-CRON_IDENTIFIER="PROJECT_IDENTIFIER=daily_arxiv_crawl"
-CRON_LINE="$CRON_SCHEDULE export PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin && cd $PROJECT_DIR && $CRON_IDENTIFIER ./run.sh >> $PROJECT_DIR/cron_crawl.log 2>&1"
+# 1. 每日爬取与 AI 研报定时任务 (每天凌晨 4:09 自动执行)
+CRON_SCHEDULE_CRAWL="9 4 * * *"
+CRON_IDENTIFIER_CRAWL="PROJECT_IDENTIFIER=daily_arxiv_crawl"
+CRON_LINE_CRAWL="$CRON_SCHEDULE_CRAWL export PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin && cd $PROJECT_DIR && $CRON_IDENTIFIER_CRAWL ./run.sh >> $PROJECT_DIR/cron_crawl.log 2>&1"
+
+# 2. 缺失摘要定期检测与修复定时任务 (每月 15 日和 30 日 18:00 自动执行，修复过去 15-30 天的论文)
+CRON_SCHEDULE_FIX="0 18 15,30 * *"
+CRON_IDENTIFIER_FIX="PROJECT_IDENTIFIER=daily_paper_fix_abstracts"
+CRON_LINE_FIX="$CRON_SCHEDULE_FIX export PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin && cd $PROJECT_DIR && $CRON_IDENTIFIER_FIX ./run_fix_abstracts.sh >> $PROJECT_DIR/cron_fix_abstracts.log 2>&1"
 
 # 定时任务辅助函数
 add_cron() {
-    # 检查是否已存在
-    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER" >/dev/null; then
-        echo "定时任务 (cron) 已配置，无需重复添加。"
+    chmod +x ./run.sh ./run_fix_abstracts.sh 2>/dev/null
+    
+    # 1. 添加每日爬取任务
+    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_CRAWL" >/dev/null; then
+        echo "每日爬取定时任务 (4:09) 已配置，无需重复添加。"
     else
-        # 确保 run.sh 具有执行权限
-        chmod +x ./run.sh
-        # 添加至 crontab
-        (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
-        echo "定时任务 (cron) 已成功添加到系统 crontab 中 (每天 4:09 自动执行)。"
+        (crontab -l 2>/dev/null; echo "$CRON_LINE_CRAWL") | crontab -
+        echo "✅ 每日爬取定时任务已成功添加到系统 crontab 中 (每天 4:09 自动执行)。"
+    fi
+
+    # 2. 添加摘要修复任务
+    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_FIX" >/dev/null; then
+        echo "摘要修复定时任务 (每月 15/30 日 18:00) 已配置，无需重复添加。"
+    else
+        (crontab -l 2>/dev/null; echo "$CRON_LINE_FIX") | crontab -
+        echo "✅ 摘要修复定时任务已成功添加到系统 crontab 中 (每月 15 日和 30 日 18:00 自动执行，覆盖过去 15-30 天论文)。"
     fi
 }
 
 remove_cron() {
-    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER" >/dev/null; then
-        crontab -l 2>/dev/null | grep -v -F "$CRON_IDENTIFIER" | crontab -
-        echo "定时任务 (cron) 已从系统 crontab 中移除。"
-    else
+    local modified=false
+    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_CRAWL" >/dev/null; then
+        crontab -l 2>/dev/null | grep -v -F "$CRON_IDENTIFIER_CRAWL" | crontab -
+        echo "每日爬取定时任务已从系统 crontab 中移除。"
+        modified=true
+    fi
+    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_FIX" >/dev/null; then
+        crontab -l 2>/dev/null | grep -v -F "$CRON_IDENTIFIER_FIX" | crontab -
+        echo "摘要修复定时任务已从系统 crontab 中移除。"
+        modified=true
+    fi
+    if [ "$modified" = "false" ]; then
         echo "未发现相关的定时任务 (cron)，无需移除。"
     fi
 }
 
 check_cron_status() {
-    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER" >/dev/null; then
-        echo "定时任务 (cron) 状态: [已启用]"
-        local cron_expr
-        cron_expr=$(crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER")
-        echo "  表达式: $cron_expr"
+    echo "=== 定时任务 (cron) 状态检查 ==="
+    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_CRAWL" >/dev/null; then
+        echo "1. 每日论文爬取任务: [已启用]"
+        local expr1
+        expr1=$(crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_CRAWL")
+        echo "   $expr1"
     else
-        echo "定时任务 (cron) 状态: [已禁用]"
+        echo "1. 每日论文爬取任务: [已禁用]"
+    fi
+
+    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_FIX" >/dev/null; then
+        echo "2. 摘要定期修复任务: [已启用]"
+        local expr2
+        expr2=$(crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_FIX")
+        echo "   $expr2"
+    else
+        echo "2. 摘要定期修复任务: [已禁用]"
     fi
 }
 

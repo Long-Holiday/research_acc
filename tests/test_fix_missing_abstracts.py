@@ -117,3 +117,19 @@ def test_update_enhanced_file():
         # 验证 p3 被追加
         p3_res = [r for r in results if r["id"] == "p3"][0]
         assert p3_res["AI"]["tldr"] == "Appended TLDR"
+
+
+def test_parse_args_days_range():
+    import sys
+    from unittest.mock import patch
+    from fix_missing_abstracts import parse_args
+
+    with patch.object(sys, "argv", ["fix_missing_abstracts.py", "--days-range", "15", "30"]):
+        args = parse_args()
+        assert args.days_range == [15, 30]
+
+    with patch.object(sys, "argv", ["fix_missing_abstracts.py", "--from-date", "2026-07-01", "--to-date", "2026-07-15"]):
+        args = parse_args()
+        assert args.from_date == "2026-07-01"
+        assert args.to_date == "2026-07-15"
+

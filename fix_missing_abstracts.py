@@ -44,7 +44,27 @@ def parse_args():
         "--date",
         type=str,
         default=None,
-        help="指定检查并修正的单个日期 (格式: YYYY-MM-DD)，若不指定则默认扫描 data/ 下所有已有日期"
+        help="指定检查并修正的单个日期 (格式: YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--days-range",
+        nargs=2,
+        type=int,
+        metavar=("START_DAYS_AGO", "END_DAYS_AGO"),
+        default=None,
+        help="指定相对今天的前推天数区间 (例如: --days-range 15 30 表示检查过去 15 至 30 天的论文)"
+    )
+    parser.add_argument(
+        "--from-date",
+        type=str,
+        default=None,
+        help="显式指定扫描开始日期 (格式: YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--to-date",
+        type=str,
+        default=None,
+        help="显式指定扫描结束日期 (格式: YYYY-MM-DD)"
     )
     parser.add_argument(
         "--max-workers",
@@ -343,12 +363,38 @@ def main():
         print("🔍 运行模式: [试运行模式 (Dry Run) - 不修改文件]")
     print("=" * 75)
 
+    from datetime import timedelta
+    
     # 确定待检查的文件列表
     if args.date:
         target_files = [os.path.join(data_dir, f"{args.date}.jsonl")]
+        print(f"🎯 目标指定日期: {args.date}")
+    elif args.days_range or (args.from_date and args.to_date):
+        if args.days_range:
+            min_days, max_days = sorted(args.days_range)
+            today_dt = datetime.now().date()
+            from_dt = today_dt - timedelta(days=max_days)
+            to_dt = today_dt - timedelta(days=min_days)
+            print(f"🕒 相对天数范围: 过去 {min_days} 至 {max_days} 天 ({from_dt.strftime('%Y-%m-%d')} 至 {to_dt.strftime('%Y-%m-%d')})")
+        else:
+            from_dt = datetime.strptime(args.from_date, "%Y-%m-%d").date()
+            to_dt = datetime.strptime(args.to_date, "%Y-%m-%d").date()
+            print(f"🕒 显式指定日期区间: {from_dt.strftime('%Y-%m-%d')} 至 {to_dt.strftime('%Y-%m-%d')}")
+
+        pattern = os.path.join(data_dir, "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].jsonl")
+        all_files = sorted(glob.glob(pattern))
+        target_files = []
+        for fpath in all_files:
+            fname = os.path.basename(fpath)
+            m = re.match(r"^(\d{4}-\d{2}-\d{2})\.jsonl$", fname)
+            if m:
+                f_date = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+                if from_dt <= f_date <= to_dt:
+                    target_files.append(fpath)
     else:
         pattern = os.path.join(data_dir, "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].jsonl")
         target_files = sorted(glob.glob(pattern))
+        print("🎯 扫描模式: 全量历史文件")
 
     if not target_files:
         print("❌ 未找到任何符合 YYYY-MM-DD.jsonl 命名规范的数据文件。")
