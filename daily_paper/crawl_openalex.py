@@ -22,9 +22,10 @@ from daily_journals import (
     fetch_openalex_details_by_dois,
     fetch_openalex_single_detail,
     fetch_openalex_papers,
-    reconstruct_abstract,
+    fetch_comprehensive_abstract,
     fetch_arxiv_abstract,
-    find_arxiv_url
+    find_arxiv_url,
+    reconstruct_abstract
 )
 
 
@@ -84,10 +85,15 @@ def main():
             print(f"Direct OpenAlex ISSN query found {len(fallback_papers)} papers.", file=sys.stderr)
             raw_papers = fallback_papers
 
-        abstract_ok = 0
-        abstract_fallback_crossref = 0
-        abstract_fallback_arxiv = 0
-        abstract_missing = 0
+        abstract_stats = {
+            "openalex": 0,
+            "semantic_scholar": 0,
+            "arxiv_link": 0,
+            "arxiv_title": 0,
+            "crossref": 0,
+            "europe_pmc": 0,
+            "missing": 0
+        }
         
         # 处理第一种情况：Crossref 有 DOI，使用 OpenAlex 补充详情，并实现多级补漏
         if crossref_list:
@@ -116,25 +122,21 @@ def main():
                     if not authors:
                         authors = crossref_item["authors"]
                         
-                    # 还原摘要
-                    summary = reconstruct_abstract(paper_detail.get("abstract_inverted_index"))
+                    # 尝试从 OpenAlex 关联的 arXiv 链接拉取
+                    arxiv_link_summary = ""
+                    arxiv_url = find_arxiv_url(paper_detail)
+                    if arxiv_url:
+                        arxiv_link_summary = fetch_arxiv_abstract(arxiv_url) or ""
                     
-                    # 摘要多级补漏
-                    if summary == "No abstract available in OpenAlex." or not summary:
-                        # 1. 尝试从 arXiv 补充
-                        arxiv_url = find_arxiv_url(paper_detail)
-                        if arxiv_url:
-                            arxiv_summary = fetch_arxiv_abstract(arxiv_url)
-                            if arxiv_summary:
-                                summary = arxiv_summary
-                                abstract_fallback_arxiv += 1
-                        
-                        # 2. 如果 arXiv 依然没有，且 Crossref 有摘要，则使用 Crossref 摘要
-                        if (summary == "No abstract available in OpenAlex." or not summary) and crossref_item["abstract"]:
-                            summary = crossref_item["abstract"]
-                            abstract_fallback_crossref += 1
-                    else:
-                        abstract_ok += 1
+                    # 统一多级摘要获取
+                    summary, source_tag = fetch_comprehensive_abstract(
+                        doi=doi,
+                        title=title,
+                        openalex_inverted_index=paper_detail.get("abstract_inverted_index"),
+                        crossref_abstract=crossref_item.get("abstract", ""),
+                        arxiv_abstract=arxiv_link_summary
+                    )
+                    abstract_stats[source_tag] = abstract_stats.get(source_tag, 0) + 1
                         
                     abs_url = paper_detail.get("doi") or paper_detail.get("primary_location", {}).get("landing_page_url") or f"https://openalex.org/{openalex_id}"
                     pdf_url = paper_detail.get("primary_location", {}).get("pdf_url") or paper_detail.get("open_access", {}).get("oa_url") or abs_url
@@ -145,18 +147,18 @@ def main():
                             concepts.append(concept.get("display_name"))
                     cited_by_count = paper_detail.get("cited_by_count", 0)
                 else:
-                    # 彻底查不到 OpenAlex 详情：使用 Crossref 元数据兜底补漏
-                    print(f"WARNING: DOI {doi} not found in OpenAlex. Using Crossref metadata fallback.", file=sys.stderr)
+                    # 彻底查不到 OpenAlex 详情：使用 Crossref 元数据 + S2/arXiv/EuropePMC 多级兜底
+                    print(f"WARNING: DOI {doi} not found in OpenAlex. Using multi-source fallback.", file=sys.stderr)
                     openalex_id = doi.replace("/", "_")
                     title = crossref_item["title"]
                     authors = crossref_item["authors"]
-                    summary = crossref_item["abstract"]
                     
-                    if summary:
-                        abstract_fallback_crossref += 1
-                    else:
-                        summary = "No abstract available."
-                        abstract_missing += 1
+                    summary, source_tag = fetch_comprehensive_abstract(
+                        doi=doi,
+                        title=title,
+                        crossref_abstract=crossref_item.get("abstract", "")
+                    )
+                    abstract_stats[source_tag] = abstract_stats.get(source_tag, 0) + 1
                         
                     abs_url = f"https://doi.org/{doi}"
                     pdf_url = abs_url
@@ -187,6 +189,7 @@ def main():
                     continue
                     
                 title = paper.get("title") or paper.get("display_name") or "No Title"
+                raw_doi = (paper.get("doi") or "").replace("https://doi.org/", "").strip()
                 
                 # 作者提取
                 authors = []
@@ -197,21 +200,19 @@ def main():
                 if not authors:
                     authors = ["Unknown Author"]
                     
-                # 还原摘要
-                summary = reconstruct_abstract(paper.get("abstract_inverted_index"))
-                if summary == "No abstract available in OpenAlex.":
-                    arxiv_url = find_arxiv_url(paper)
-                    if arxiv_url:
-                        arxiv_summary = fetch_arxiv_abstract(arxiv_url)
-                        if arxiv_summary:
-                            summary = arxiv_summary
-                            abstract_fallback_arxiv += 1
-                        else:
-                            abstract_missing += 1
-                    else:
-                        abstract_missing += 1
-                else:
-                    abstract_ok += 1
+                # 尝试从 OpenAlex 关联的 arXiv 链接拉取
+                arxiv_link_summary = ""
+                arxiv_url = find_arxiv_url(paper)
+                if arxiv_url:
+                    arxiv_link_summary = fetch_arxiv_abstract(arxiv_url) or ""
+                
+                summary, source_tag = fetch_comprehensive_abstract(
+                    doi=raw_doi,
+                    title=title,
+                    openalex_inverted_index=paper.get("abstract_inverted_index"),
+                    arxiv_abstract=arxiv_link_summary
+                )
+                abstract_stats[source_tag] = abstract_stats.get(source_tag, 0) + 1
                 
                 abs_url = paper.get("doi") or paper.get("primary_location", {}).get("landing_page_url") or f"https://openalex.org/{openalex_id}"
                 pdf_url = paper.get("primary_location", {}).get("pdf_url") or paper.get("open_access", {}).get("oa_url") or abs_url
@@ -237,7 +238,7 @@ def main():
                 formatted_papers.append(item)
                 total_new_papers += 1
                 
-        print(f"  Abstract stats: {abstract_ok} from OpenAlex, {abstract_fallback_crossref} from Crossref fallback, {abstract_fallback_arxiv} from arXiv fallback, {abstract_missing} missing", file=sys.stderr)
+        print(f"  Abstract stats for {journal['name']}: {abstract_stats}", file=sys.stderr)
 
     if formatted_papers:
         output_dir = os.path.dirname(args.output)

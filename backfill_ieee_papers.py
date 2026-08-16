@@ -36,9 +36,10 @@ from daily_paper.daily_journals import (
     fetch_openalex_details_by_dois,
     fetch_openalex_single_detail,
     fetch_openalex_papers,
-    reconstruct_abstract,
+    fetch_comprehensive_abstract,
     fetch_arxiv_abstract,
-    find_arxiv_url
+    find_arxiv_url,
+    reconstruct_abstract
 )
 
 # 目标补录期刊配置
@@ -187,6 +188,7 @@ def fetch_and_format_journal_papers(
             if not openalex_id:
                 continue
             title = paper.get("title") or paper.get("display_name") or "No Title"
+            raw_doi = (paper.get("doi") or "").replace("https://doi.org/", "").strip()
             authors = []
             for authorship in paper.get("authorships", []):
                 author_name = authorship.get("author", {}).get("display_name")
@@ -195,14 +197,18 @@ def fetch_and_format_journal_papers(
             if not authors:
                 authors = ["Unknown Author"]
                 
-            summary = reconstruct_abstract(paper.get("abstract_inverted_index"))
-            if summary == "No abstract available in OpenAlex." or not summary:
-                arxiv_url = find_arxiv_url(paper)
-                if arxiv_url:
-                    arxiv_summary = fetch_arxiv_abstract(arxiv_url)
-                    if arxiv_summary:
-                        summary = arxiv_summary
-                        
+            arxiv_link_summary = ""
+            arxiv_url = find_arxiv_url(paper)
+            if arxiv_url:
+                arxiv_link_summary = fetch_arxiv_abstract(arxiv_url) or ""
+                
+            summary, _ = fetch_comprehensive_abstract(
+                doi=raw_doi,
+                title=title,
+                openalex_inverted_index=paper.get("abstract_inverted_index"),
+                arxiv_abstract=arxiv_link_summary
+            )
+                
             abs_url = paper.get("doi") or paper.get("primary_location", {}).get("landing_page_url") or f"https://openalex.org/{openalex_id}"
             pdf_url = paper.get("primary_location", {}).get("pdf_url") or paper.get("open_access", {}).get("oa_url") or abs_url
             
@@ -244,17 +250,19 @@ def fetch_and_format_journal_papers(
             if not authors:
                 authors = crossref_item["authors"]
                 
-            summary = reconstruct_abstract(paper_detail.get("abstract_inverted_index"))
-            if summary == "No abstract available in OpenAlex." or not summary:
-                arxiv_url = find_arxiv_url(paper_detail)
-                if arxiv_url:
-                    arxiv_summary = fetch_arxiv_abstract(arxiv_url)
-                    if arxiv_summary:
-                        summary = arxiv_summary
-                        
-                if (summary == "No abstract available in OpenAlex." or not summary) and crossref_item["abstract"]:
-                    summary = crossref_item["abstract"]
-                    
+            arxiv_link_summary = ""
+            arxiv_url = find_arxiv_url(paper_detail)
+            if arxiv_url:
+                arxiv_link_summary = fetch_arxiv_abstract(arxiv_url) or ""
+                
+            summary, _ = fetch_comprehensive_abstract(
+                doi=doi,
+                title=title,
+                openalex_inverted_index=paper_detail.get("abstract_inverted_index"),
+                crossref_abstract=crossref_item.get("abstract", ""),
+                arxiv_abstract=arxiv_link_summary
+            )
+                
             abs_url = paper_detail.get("doi") or paper_detail.get("primary_location", {}).get("landing_page_url") or f"https://openalex.org/{openalex_id}"
             pdf_url = paper_detail.get("primary_location", {}).get("pdf_url") or paper_detail.get("open_access", {}).get("oa_url") or abs_url
             
@@ -267,7 +275,11 @@ def fetch_and_format_journal_papers(
             openalex_id = doi.replace("/", "_")
             title = crossref_item["title"]
             authors = crossref_item["authors"]
-            summary = crossref_item["abstract"] or "No abstract available."
+            summary, _ = fetch_comprehensive_abstract(
+                doi=doi,
+                title=title,
+                crossref_abstract=crossref_item.get("abstract", "")
+            )
             abs_url = f"https://doi.org/{doi}"
             pdf_url = abs_url
             concepts = []
