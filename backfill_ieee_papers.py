@@ -112,6 +112,11 @@ def parse_args():
         help="补录 constants.py 中的全部 15 本期刊，而不仅限于 IEEE 期刊"
     )
     parser.add_argument(
+        "--only-sync",
+        action="store_true",
+        help="仅重新提取关键词并同步本地 statistics.db 数据库，不重新抓取论文"
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="试运行模式：仅统计缺失并打印，不实际写入文件"
@@ -353,6 +358,12 @@ def main():
     print(f"🎯 目标期刊: {', '.join(journal_names)}")
     print(f"🤖 AI 模型: {model_name} | 目标语言: {language} | 并发数: {args.max_workers}")
     print("=" * 70)
+
+    if args.only_sync:
+        print("⚡ 已指定 --only-sync：跳过抓取与 AI 增强，直接执行关键词提取与数据库同步...")
+        sync_database_stats()
+        print("=" * 70)
+        return
 
     # 确定待处理日期列表，并按时间升序排列（先处理早的日期，再处理晚的日期）
     if args.date:
