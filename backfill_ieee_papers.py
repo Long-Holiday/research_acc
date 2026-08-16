@@ -354,19 +354,19 @@ def main():
     print(f"🤖 AI 模型: {model_name} | 目标语言: {language} | 并发数: {args.max_workers}")
     print("=" * 70)
 
-    # 确定待处理日期列表
+    # 确定待处理日期列表，并按时间升序排列（先处理早的日期，再处理晚的日期）
     if args.date:
         dates_to_process = [args.date]
     else:
-        dates_to_process = get_existing_dates()
+        dates_to_process = sorted(get_existing_dates())
 
     if not dates_to_process:
         print("❌ 未发现可处理的日期文件。请检查 data/ 目录或通过 --date 指定。")
         return
 
-    print(f"📅 发现待检查/补录的本地日期 ({len(dates_to_process)} 个): {', '.join(dates_to_process)}")
+    print(f"📅 发现待检查/补录的本地日期 ({len(dates_to_process)} 个，按时间顺序处理): {', '.join(dates_to_process)}")
     
-    # 记录跨日期全局见过的 ID，防止多个日期文件重复添加同一篇论文
+    # 记录跨日期全局见过的 ID/DOI（包含本地历史数据所有已存在的论文），防止跨日期重复添加同一篇论文
     global_seen_ids = set()
     for d in dates_to_process:
         raw_path = os.path.join(PROJECT_ROOT, "data", f"{d}.jsonl")
@@ -409,19 +409,21 @@ def main():
                 pid = str(p.get("id", "")).lower().strip()
                 doi_part = p.get("abs", "").split("doi.org/")[-1].lower().strip() if "doi.org/" in p.get("abs", "") else ""
                 
-                # 检查是否已存在当前文件或全局重复
-                if pid and pid in current_file_ids:
+                # 严格跨日期比对去重：既不在当前文件，也不在历史已收录的任何日期文件中
+                if pid and (pid in current_file_ids or pid in global_seen_ids):
                     continue
-                if doi_part and doi_part in current_file_ids:
+                if doi_part and (doi_part in current_file_ids or doi_part in global_seen_ids):
                     continue
                     
                 date_new_papers.append(p)
                 current_file_ids.add(pid)
+                global_seen_ids.add(pid)
                 if doi_part:
                     current_file_ids.add(doi_part)
+                    global_seen_ids.add(doi_part)
                 new_count += 1
                 
-            print(f"   -> 发现 {len(papers)} 篇，新增待补录: {new_count} 篇")
+            print(f"   -> 发现 {len(papers)} 篇，跨日期比对后新增待补录: {new_count} 篇")
 
         print(f"📊 日期 {date_str} 汇总: 共需补录 {len(date_new_papers)} 篇新论文")
         
