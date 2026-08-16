@@ -624,6 +624,52 @@ main {
   border: 1px solid var(--border-accent);
 }
 
+/* 英文摘要状态标签 / English Abstract Badge */
+.abstract-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+  vertical-align: middle;
+  line-height: 1.4;
+  user-select: none;
+  transition: var(--transition);
+}
+
+.abstract-tag .abstract-icon {
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+/* 包含英文摘要：清新绿 */
+.abstract-tag.has-abstract {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+}
+
+.abstract-tag.has-abstract:hover {
+  background-color: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+/* 缺失英文摘要：清晰警示红，提示用户无需点击 */
+.abstract-tag.no-abstract {
+  background-color: rgba(239, 68, 68, 0.08);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  font-weight: 600;
+}
+
+.abstract-tag.no-abstract:hover {
+  background-color: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
 .paper-card-body {
   padding: 20px;
   flex-grow: 1;

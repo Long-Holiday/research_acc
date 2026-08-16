@@ -716,12 +716,35 @@ function selectLanguageForDate(date, preferredLanguage = null) {
   return availableLanguages[0];
 }
 
+// 判断论文是否有有效的英文摘要 / Check if English Abstract is available
+function hasEnglishAbstract(rawAbstract) {
+  if (!rawAbstract || typeof rawAbstract !== 'string') return false;
+  const s = rawAbstract.trim();
+  if (s.length < 25) return false;
+  const lower = s.toLowerCase().replace(/[\.\s]+$/, '');
+  const invalidPhrases = [
+    'no abstract available in openalex',
+    'no abstract available',
+    'abstract not available',
+    'no abstract',
+    'abstract unavailable',
+    'none',
+    'n/a',
+    'not available'
+  ];
+  if (invalidPhrases.includes(lower)) return false;
+  if (lower.startsWith('no abstract available in openalex')) return false;
+  return true;
+}
+
 function normalizePaper(paper, date) {
   const allCategories = Array.isArray(paper.categories) 
     ? paper.categories 
     : (paper.categories ? [paper.categories] : []);
   
-  const summary = paper.AI && paper.AI.tldr ? paper.AI.tldr : (paper.summary || '');
+  const rawDetails = paper.summary || '';
+  const summary = paper.AI && paper.AI.tldr ? paper.AI.tldr : rawDetails;
+  const hasAbstract = hasEnglishAbstract(rawDetails);
   
   return {
     title: paper.title || '',
@@ -730,7 +753,8 @@ function normalizePaper(paper, date) {
     authors: Array.isArray(paper.authors) ? paper.authors.join(', ') : (paper.authors || ''),
     category: allCategories,
     summary: summary,
-    details: paper.summary || '',
+    details: rawDetails,
+    has_abstract: hasAbstract,
     date: date || paper.date || '',
     id: paper.id || '',
     motivation: paper.AI && paper.AI.motivation ? paper.AI.motivation : '',
@@ -1129,16 +1153,26 @@ function formatAuthorsForCard(authorsString, authorTerms = []) {
 
 function createPaperCard(paper, globalIndex, clickIndex) {
   const paperCard = document.createElement('div');
-  paperCard.className = `paper-card ${paper.isMatched ? 'matched-paper' : ''}`;
+  const hasAbstract = paper.has_abstract !== undefined 
+    ? paper.has_abstract 
+    : hasEnglishAbstract(paper.details || paper.summary);
+  
+  paperCard.className = `paper-card ${paper.isMatched ? 'matched-paper' : ''} ${hasAbstract ? 'has-abstract' : 'no-abstract'}`;
   paperCard.dataset.id = paper.id || paper.url;
   
   if (paper.isMatched && paper.matchReason) {
     paperCard.title = `匹配: ${Array.isArray(paper.matchReason) ? paper.matchReason.join(' | ') : paper.matchReason}`;
   }
   
-  const categoryTags = paper.allCategories ? 
-    paper.allCategories.map(cat => `<span class="category-tag">${cat}</span>`).join('') : 
-    `<span class="category-tag">${paper.category}</span>`;
+  const categoryTags = (paper.allCategories && paper.allCategories.length > 0)
+    ? paper.allCategories.map(cat => `<span class="category-tag">${cat}</span>`).join('') 
+    : (Array.isArray(paper.category) 
+        ? paper.category.map(cat => `<span class="category-tag">${cat}</span>`).join('')
+        : `<span class="category-tag">${paper.category || ''}</span>`);
+  
+  const abstractBadge = hasAbstract
+    ? `<span class="abstract-tag has-abstract" title="包含英文摘要 / English Abstract Available"><svg class="abstract-icon" viewBox="0 0 16 16" width="11" height="11" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg>有英文摘要</span>`
+    : `<span class="abstract-tag no-abstract" title="缺失英文摘要 / No English Abstract"><svg class="abstract-icon" viewBox="0 0 16 16" width="11" height="11" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>无英文摘要</span>`;
   
   const titleSummaryTerms = [];
   if (activeKeywords.length > 0) {
@@ -1172,6 +1206,7 @@ function createPaperCard(paper, globalIndex, clickIndex) {
       <p class="paper-card-authors">${formattedAuthors}</p>
       <div class="paper-card-categories">
         ${categoryTags}
+        ${abstractBadge}
       </div>
     </div>
     <div class="paper-card-body">
@@ -1347,7 +1382,10 @@ function showPaperDetails(paper, paperIndex) {
   }
   modalTitle.innerHTML = paperIndex ? `<span class="paper-index-badge">${paperIndex}</span> ${titleHtml}` : titleHtml;
   
-  const abstractText = paper.details || '';
+  const hasAbstract = paper.has_abstract !== undefined 
+    ? paper.has_abstract 
+    : hasEnglishAbstract(paper.details || paper.summary);
+  const abstractText = hasAbstract ? (paper.details || '') : '';
   
   const categoryDisplay = paper.allCategories ? 
     paper.allCategories.join(', ') : 
