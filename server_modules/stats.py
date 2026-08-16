@@ -74,9 +74,17 @@ def fetch_top_papers_from_openalex(issn_list, from_date):
     }
     api_key = os.environ.get("OPENALEX_API_KEY", "")
     
+    # 对于 IEEE 等只记录出版年份（如 2026-01-01）的期刊，将查询起始日期拓展到当年年初，避免被排查在外
+    try:
+        from_year = from_date.split("-")[0]
+        year_start = f"{from_year}-01-01"
+        query_from_date = min(from_date, year_start)
+    except Exception:
+        query_from_date = from_date
+
     url = "https://api.openalex.org/works"
     params = {
-        "filter": f"primary_location.source.issn:{issn_str},from_publication_date:{from_date}",
+        "filter": f"primary_location.source.issn:{issn_str},from_publication_date:{query_from_date}",
         "sort": "cited_by_count:desc",
         "per_page": 200,  # 获取更多候选论文以进行速率和热度排序
         "page": 1
