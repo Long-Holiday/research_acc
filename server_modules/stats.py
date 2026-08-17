@@ -148,7 +148,14 @@ def fetch_top_papers_from_openalex(issn_list, from_date):
     return formatted_papers
 
 import sys
+import time
 IS_TESTING = "pytest" in sys.modules or "unittest" in sys.modules
+
+# 服务端统计结果内存缓存 (TTL 300秒)
+stats_cache = {}
+
+def clear_stats_cache():
+    stats_cache.clear()
 
 def get_db_path():
     if config.DB_PATH != "data/statistics.db":
@@ -160,6 +167,62 @@ def get_db_path():
     if hasattr(processor, "DB_PATH") and getattr(processor, "DB_PATH") != "data/statistics.db":
         return getattr(processor, "DB_PATH")
     return config.DB_PATH
+
+@router.get("/api/stats/categories")
+def get_categories_stats(
+    start_date: str,
+    end_date: str,
+    lang: str = "en",
+    token: str = Depends(verify_token)
+):
+    if IS_TESTING:
+        try:
+            scan_and_process_files()
+        except Exception:
+            pass
+            
+    db_path = get_db_path()
+    if not os.path.exists(db_path):
+        return {"categories": [], "category_counts": {}, "total_all": 0}
+        
+    cache_key = f"cat_{start_date}_{end_date}_{lang}"
+    if not IS_TESTING and cache_key in stats_cache:
+        res, exp = stats_cache[cache_key]
+        if time.time() < exp:
+            return res
+            
+    conn = connect_db(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+        SELECT category, SUM(total_papers)
+        FROM agg_daily_papers
+        WHERE paper_date BETWEEN ? AND ? AND language = ?
+        GROUP BY category
+        ORDER BY category ASC
+        """, (start_date, end_date, lang))
+        
+        category_counts = {}
+        total_all = 0
+        for cat, cnt in cursor.fetchall():
+            if cat and cat.strip():
+                category_counts[cat] = cnt
+                total_all += cnt
+                
+        categories = sorted(list(category_counts.keys()))
+        result = {
+            "categories": categories,
+            "category_counts": category_counts,
+            "total_all": total_all
+        }
+        if not IS_TESTING:
+            stats_cache[cache_key] = (result, time.time() + 300)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch category stats: {str(e)}")
+    finally:
+        conn.close()
+
 @router.get("/api/stats/keywords")
 def get_keyword_stats(
     start_date: str, 
@@ -177,6 +240,12 @@ def get_keyword_stats(
     db_path = get_db_path()
     if not os.path.exists(db_path):
         return {"keywords": [], "daily_trends": []}
+        
+    cache_key = f"kw_{start_date}_{end_date}_{lang}_{category}"
+    if not IS_TESTING and cache_key in stats_cache:
+        res, exp = stats_cache[cache_key]
+        if time.time() < exp:
+            return res
         
     conn = connect_db(db_path)
     try:
@@ -301,10 +370,13 @@ def get_keyword_stats(
                 
         daily_trends.sort(key=lambda x: x["date"])
         
-        return {
+        result = {
             "keywords": keywords_list,
             "daily_trends": daily_trends
         }
+        if not IS_TESTING:
+            stats_cache[cache_key] = (result, time.time() + 300)
+        return result
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -330,6 +402,12 @@ def get_network_stats(
     db_path = get_db_path()
     if not os.path.exists(db_path):
         return {"nodes": [], "links": []}
+        
+    cache_key = f"net_{start_date}_{end_date}_{lang}_{category}_{exclude}"
+    if not IS_TESTING and cache_key in stats_cache:
+        res, exp = stats_cache[cache_key]
+        if time.time() < exp:
+            return res
         
     conn = connect_db(db_path)
     try:
@@ -456,10 +534,13 @@ def get_network_stats(
         except Exception as e:
             print(f"Error doing community detection: {e}")
             
-        return {
+        result = {
             "nodes": nodes,
             "links": links
         }
+        if not IS_TESTING:
+            stats_cache[cache_key] = (result, time.time() + 300)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
     finally:

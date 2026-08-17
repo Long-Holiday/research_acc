@@ -92,7 +92,11 @@ def _init_tables(cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pk_paper_id ON paper_keywords (paper_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pk_date_lang_cat ON paper_keywords (paper_date, language, category)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pk_keyword ON paper_keywords (keyword)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pk_lang_date_cat_kw ON paper_keywords (language, paper_date, category, keyword)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_papers_date_lang ON papers (paper_date, language)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_agg_kw_lang_cat_date ON agg_daily_keywords (language, category, paper_date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_agg_kw_lang_date ON agg_daily_keywords (language, paper_date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_agg_papers_lang_date ON agg_daily_papers (language, paper_date)")
 
 
 def get_db_path():
@@ -330,6 +334,13 @@ def scan_and_process_files():
             finally:
                 conn.close()
 
+        if files_to_process:
+            try:
+                from server_modules.stats import clear_stats_cache
+                clear_stats_cache()
+            except Exception:
+                pass
+
 reextract_lock = threading.Lock()
 reextract_status = {
     "status": "idle",
@@ -548,6 +559,12 @@ def reextract_all_keywords():
                     }
             finally:
                 conn.close()
+
+        try:
+            from server_modules.stats import clear_stats_cache
+            clear_stats_cache()
+        except Exception:
+            pass
 
         with reextract_lock:
             reextract_status = {

@@ -128,6 +128,17 @@ def test_auth_and_data_apis():
         kws = [k["keyword"] for k in res_data["keywords"]]
         assert "test" in kws
 
+        # Test categories stats API
+        response = client.get("/api/stats/categories?start_date=2026-07-09&end_date=2026-07-09&lang=Chinese", headers=headers)
+        assert response.status_code == 200
+        res_cat = response.json()
+        assert "categories" in res_cat
+        assert "category_counts" in res_cat
+        assert "total_all" in res_cat
+        assert "cs.CV" in res_cat["categories"]
+        assert res_cat["category_counts"]["cs.CV"] >= 1
+        assert res_cat["total_all"] >= 1
+
         # Test network stats API
         response = client.get("/api/stats/network?start_date=2026-07-09&end_date=2026-07-09&lang=Chinese&category=All", headers=headers)
         assert response.status_code == 200

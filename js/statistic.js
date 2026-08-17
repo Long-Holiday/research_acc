@@ -553,87 +553,68 @@ async function loadPapersByDateRange(startDate, endDate) {
   }
   
   const container = document.getElementById('papersList');
-  container.innerHTML = `
-    <div class="loading-container">
-      <div class="loading-spinner"></div>
-      <p>Loading papers from ${formatDate(startDate)} to ${formatDate(endDate)}...</p>
-    </div>
-  `;
-  
-  try {
-    // 加载时间范围内所有论文数据
-    const allPaperData = {};
-    allPapersData = []; // 重置全局论文数据
-    
-    const dataUrl = `/api/papers/range?start_date=${startDate}&end_date=${endDate}&lang=${globalLang}`;
-    const response = await Auth.fetchWithAuth(dataUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch papers for range: ${response.statusText}`);
-    }
-    const dataPapers = await response.json();
-    if (Array.isArray(dataPapers)) {
-      const normalized = dataPapers.map(p => normalizePaper(p, p.date));
-      
-      normalized.forEach(paper => {
-        if (paper.category && paper.category.length > 0) {
-          const primaryCategory = paper.category[0];
-          if (!allPaperData[primaryCategory]) {
-            allPaperData[primaryCategory] = [];
-          }
-          allPaperData[primaryCategory].push(paper);
-        }
-        allPapersData.push(paper);
-      });
-    }
-    
-    paperData = allPaperData;
-    
-    // 渲染 Category tabs 并展示统计信息
-    renderCategoryTabs(validDatesInRange);
-    
-  } catch (error) {
-    console.error('加载论文数据失败:', error);
+  if (container) {
     container.innerHTML = `
-      <div class="loading-container">
-        <p>Loading data fails. Please retry.</p>
-        <p>Error messages: ${error.message}</p>
+      <div class="category-filter-wrapper">
+        <div class="category-filter-title">选择论文分类 / Select Category</div>
+        <div class="category-tabs" id="categoryTabs">
+          <button class="category-tab active" data-category="All">
+            <span class="tab-name">All Categories (全部)</span>
+            <span class="tab-count">...</span>
+          </button>
+        </div>
       </div>
     `;
   }
+
+  // 1. 立即发起关键词统计请求（完全不被论文列表下载阻塞，首屏极速呈现）
+  renderCategoryStats(selectedCategories, validDatesInRange);
+
+  // 2. 并行拉取轻量分类统计元数据（耗时 < 5ms）
+  loadCategoryTabs(startDate, endDate, globalLang, validDatesInRange);
 }
 
-function renderCategoryTabs(validDatesInRange) {
-  const container = document.getElementById('papersList');
-  
-  // 1. 收集所有包含的类别 (仅基于主分类 primaryCategory)
-  const categoriesSet = new Set();
-  allPapersData.forEach(paper => {
-    if (paper.category && paper.category.length > 0) {
-      categoriesSet.add(paper.category[0]);
+async function loadCategoryTabs(startDate, endDate, lang, validDatesInRange) {
+  try {
+    const catUrl = `/api/stats/categories?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}&lang=${encodeURIComponent(lang)}`;
+    const response = await Auth.fetchWithAuth(catUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to load categories: ${response.statusText}`);
     }
-  });
+    const catData = await response.json();
+    const availableCategories = catData.categories || [];
+    const categoryCounts = catData.category_counts || {};
+    const totalAll = catData.total_all || 0;
+    
+    renderCategoryTabsUI(availableCategories, categoryCounts, totalAll, validDatesInRange);
+  } catch (err) {
+    console.error('加载分类信息失败:', err);
+  }
+}
+
+function renderCategoryTabsUI(availableCategories, categoryCounts, totalAll, validDatesInRange) {
+  const container = document.getElementById('papersList');
+  if (!container) return;
   
-  // 过滤一些空白或无效的分类并排序
-  const availableCategories = Array.from(categoriesSet)
-    .filter(cat => cat && cat.trim().length > 0)
-    .sort();
-  
-  // 2. 生成 HTML 结构
+  // 恢复有效选择
+  const validSelections = selectedCategories.filter(cat => cat === 'All' || availableCategories.includes(cat));
+  selectedCategories = validSelections.length > 0 ? validSelections : ['All'];
+
   container.innerHTML = `
     <div class="category-filter-wrapper">
       <div class="category-filter-title">选择论文分类 / Select Category</div>
       <div class="category-tabs" id="categoryTabs">
-        <button class="category-tab active" data-category="All">
+        <button class="category-tab ${selectedCategories.includes('All') ? 'active' : ''}" data-category="All">
           <span class="tab-name">All Categories (全部)</span>
-          <span class="tab-count">${allPapersData.length}</span>
+          <span class="tab-count">${totalAll}</span>
         </button>
         ${availableCategories.map(cat => {
-          const papersInCat = allPapersData.filter(paper => paper.category && paper.category[0] === cat);
-          const displayName = cat;
+          const count = categoryCounts[cat] || 0;
+          const isSelected = selectedCategories.includes(cat);
           return `
-            <button class="category-tab" data-category="${cat}">
-              <span class="tab-name">${displayName}</span>
-              <span class="tab-count">${papersInCat.length}</span>
+            <button class="category-tab ${isSelected ? 'active' : ''}" data-category="${cat}">
+              <span class="tab-name">${cat}</span>
+              <span class="tab-count">${count}</span>
             </button>
           `;
         }).join('')}
@@ -641,8 +622,8 @@ function renderCategoryTabs(validDatesInRange) {
     </div>
   `;
 
-  // 3. 绑定 Tab 点击事件
-  const tabs = document.querySelectorAll('.category-tab');
+  // 绑定 Tab 点击事件
+  const tabs = container.querySelectorAll('.category-tab');
   tabs.forEach(tab => {
     tab.addEventListener('click', (e) => {
       const target = e.currentTarget;
@@ -656,7 +637,7 @@ function renderCategoryTabs(validDatesInRange) {
         // Remove 'All' if present
         if (selectedCategories.includes('All')) {
           selectedCategories = [];
-          document.querySelector('.category-tab[data-category="All"]')?.classList.remove('active');
+          container.querySelector('.category-tab[data-category="All"]')?.classList.remove('active');
         }
         
         if (selectedCategories.includes(cat)) {
@@ -667,7 +648,7 @@ function renderCategoryTabs(validDatesInRange) {
           // If empty, revert to 'All'
           if (selectedCategories.length === 0) {
             selectedCategories = ['All'];
-            document.querySelector('.category-tab[data-category="All"]')?.classList.add('active');
+            container.querySelector('.category-tab[data-category="All"]')?.classList.add('active');
           }
         } else {
           // Select
@@ -679,52 +660,14 @@ function renderCategoryTabs(validDatesInRange) {
       renderCategoryStats(selectedCategories, validDatesInRange);
     });
   });
-
-  // 4. 恢复选中状态或默认 "All"
-  const validSelections = selectedCategories.filter(cat => cat === 'All' || availableCategories.includes(cat));
-  if (validSelections.length === 0) {
-    selectedCategories = ['All'];
-  } else {
-    selectedCategories = validSelections;
-  }
-  
-  tabs.forEach(t => {
-    const cat = t.getAttribute('data-category');
-    if (selectedCategories.includes(cat)) {
-      t.classList.add('active');
-    } else {
-      t.classList.remove('active');
-    }
-  });
-
-  renderCategoryStats(selectedCategories, validDatesInRange);
 }
 
 async function renderCategoryStats(categories, validDatesInRange) {
   const isAll = categories.includes('All');
-  
-  const filteredPapers = isAll 
-    ? allPapersData 
-    : allPapersData.filter(paper => paper.category && categories.includes(paper.category[0]));
-     
   const hotKeywordsList = document.getElementById('hotKeywordsList');
   const trendChartCard = document.getElementById('trendChartCard');
   const netContainer = document.getElementById('networkContainer');
   const distSection = document.getElementById('keywordDistributionSection');
-
-  // 无数据处理
-  if (filteredPapers.length === 0) {
-    const noDataHTML = `
-      <div class="no-data" style="padding: 20px; text-align: center; color: var(--text-secondary);">
-        <p>当前分类下暂无论文数据 / No papers in this category.</p>
-      </div>
-    `;
-    if (hotKeywordsList) hotKeywordsList.innerHTML = noDataHTML;
-    if (trendChartCard) trendChartCard.innerHTML = noDataHTML;
-    if (netContainer) netContainer.innerHTML = noDataHTML;
-    if (distSection) distSection.style.display = 'none';
-    return;
-  }
 
   // 1. 展示 Loading 状态，更新分类名称
   const categoryDisplayName = isAll ? 'All Categories' : categories.join(', ');
@@ -2276,45 +2219,81 @@ function formatDate(dateString) {
   });
 }
 
-// 修改 showRelatedPapers 函数中生成论文卡片的部分
-function showRelatedPapers(keyword) {
+async function showRelatedPapers(keyword) {
     const sidebar = document.getElementById('paperSidebar');
     const selectedKeywordElement = document.getElementById('selectedKeyword');
     const relatedPapersContainer = document.getElementById('relatedPapers');
     
     // 更新关键词显示
-    selectedKeywordElement.textContent = 'Keyword: ' + keyword;
+    if (selectedKeywordElement) {
+        selectedKeywordElement.textContent = 'Keyword: ' + keyword;
+    }
     
-    // 查找包含关键词的论文
-    const relatedPapers = allPapersData.filter(paper => {
-        const searchText = (paper.title + ' ' + paper.summary).toLowerCase();
-        return searchText.includes(keyword.toLowerCase());
-    });
-    
-    // 生成相关论文的HTML
-    const papersHTML = relatedPapers.map((paper, index) => `
-        <div class="paper-card">
-            <div class="paper-number">${index + 1}</div>
-            <a href="${paper.url}" target="_blank" class="paper-title">
-                ${paper.title}
-                ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${escapeHtml(paper.translated_title)}</div>` : ''}
-            </a>
-            <div class="paper-authors">${paper.authors}</div>
-            <div class="paper-categories">
-                ${paper.category.map(cat => `<span class="category-tag">${cat}</span>`).join('')}
+    // 显示侧边栏与 Loading 状态
+    if (sidebar) {
+        sidebar.classList.add('active');
+    }
+    if (relatedPapersContainer) {
+        relatedPapersContainer.innerHTML = `
+            <div class="loading-container" style="padding: 30px; text-align: center;">
+                <div class="loading-spinner"></div>
+                <p style="margin-top: 10px; color: var(--text-secondary);">Loading papers for "${escapeHtml(keyword)}"...</p>
             </div>
-            <div class="paper-summary">${paper.summary}</div>
-        </div>
-    `).join('');
+        `;
+    }
     
-    // 更新侧边栏内容
-    relatedPapersContainer.innerHTML = relatedPapers.length > 0 
-        ? papersHTML 
-        : '<p>No related papers found.</p>';
-    
-    // 显示侧边栏
-    sidebar.classList.add('active');
+    try {
+        let url = `/api/papers/range?start_date=${encodeURIComponent(globalStartDate)}&end_date=${encodeURIComponent(globalEndDate)}&lang=${encodeURIComponent(globalLang)}&keyword=${encodeURIComponent(keyword)}&page=1&page_size=50`;
+        if (selectedCategories && selectedCategories.length > 0 && !selectedCategories.includes('All')) {
+            url += `&category=${encodeURIComponent(selectedCategories.join(','))}`;
+        }
+        const res = await Auth.fetchWithAuth(url);
+        if (!res.ok) {
+            throw new Error(`Failed to load related papers: ${res.statusText}`);
+        }
+        const data = await res.json();
+        const papersList = Array.isArray(data) ? data : (data.items || []);
+        const totalCount = data.total !== undefined ? data.total : papersList.length;
+        
+        const normalizedPapers = papersList.map(p => normalizePaper(p, p.date));
+        
+        if (normalizedPapers.length === 0) {
+            if (relatedPapersContainer) {
+                relatedPapersContainer.innerHTML = '<p style="padding: 20px; text-align: center; color: var(--text-secondary);">No related papers found.</p>';
+            }
+            return;
+        }
+
+        const countHeader = totalCount > normalizedPapers.length
+            ? `<div style="padding: 8px 12px; margin-bottom: 12px; background: var(--bg-secondary, #f1f5f9); border-radius: 6px; font-size: 13px; color: var(--text-secondary);">Showing top ${normalizedPapers.length} of ${totalCount} papers</div>`
+            : `<div style="padding: 8px 12px; margin-bottom: 12px; background: var(--bg-secondary, #f1f5f9); border-radius: 6px; font-size: 13px; color: var(--text-secondary);">${normalizedPapers.length} paper(s) found</div>`;
+
+        const papersHTML = normalizedPapers.map((paper, index) => `
+            <div class="paper-card">
+                <div class="paper-number">${index + 1}</div>
+                <a href="${paper.url}" target="_blank" class="paper-title">
+                    ${escapeHtml(paper.title)}
+                    ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${escapeHtml(paper.translated_title)}</div>` : ''}
+                </a>
+                <div class="paper-authors">${escapeHtml(paper.authors)}</div>
+                <div class="paper-categories">
+                    ${paper.category.map(cat => `<span class="category-tag">${escapeHtml(cat)}</span>`).join('')}
+                </div>
+                <div class="paper-summary">${escapeHtml(paper.summary)}</div>
+            </div>
+        `).join('');
+        
+        if (relatedPapersContainer) {
+            relatedPapersContainer.innerHTML = countHeader + papersHTML;
+        }
+    } catch (err) {
+        console.error('加载关键词相关论文失败:', err);
+        if (relatedPapersContainer) {
+            relatedPapersContainer.innerHTML = `<p style="padding: 20px; text-align: center; color: #ef4444;">Failed to load papers: ${escapeHtml(err.message)}</p>`;
+        }
+    }
 }
+window.showRelatedPapers = showRelatedPapers;
 
 // 添加新函数：关闭侧边栏
 function closeSidebar() {
