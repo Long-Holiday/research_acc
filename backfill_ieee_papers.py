@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-独立补录脚本：补录本地数据中缺失的 IEEE 期刊论文（TGRS、JSTARS、GRSL）并执行 AI 增强处理。
-Independent Backfill Script: Backfill missing IEEE journal papers (TGRS, JSTARS, GRSL) 
+期刊论文补录与 AI 增强工具：
+补录本地数据中缺失的期刊论文（默认支持全部 15 本遥感与相关领域顶级期刊，亦可指定 IEEE 或特定期刊）并执行 AI 增强处理与数据库同步。
+Journal Paper Backfill Tool: Backfill missing journal papers across all 15 journals 
 and perform AI enhancement for local JSONL files.
 """
 
@@ -42,7 +43,7 @@ from daily_paper.daily_journals import (
     reconstruct_abstract
 )
 
-# 目标补录期刊配置
+# IEEE 目标期刊配置（供 --ieee-only 模式使用）
 IEEE_JOURNAL_TARGETS = [
     {
         "name": "TGRS",
@@ -64,25 +65,33 @@ IEEE_JOURNAL_TARGETS = [
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="补录本地数据中缺失的 IEEE 期刊（TGRS、JSTARS、GRSL）论文并进行 AI 增强"
+        description="补录本地数据中缺失的期刊论文（默认全部 15 本期刊，支持自定义或仅 IEEE）并进行 AI 增强与数据库同步"
     )
     parser.add_argument(
         "--date",
         type=str,
         default=None,
-        help="指定补录的单个日期 (格式: YYYY-MM-DD)，若不指定则默认扫描 data/ 下所有已有日期"
+        help="指定补录的单个日期 (格式: YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--days-range",
+        nargs=2,
+        type=int,
+        metavar=("START_DAYS_AGO", "END_DAYS_AGO"),
+        default=None,
+        help="指定相对今天的前推天数区间 (例如: --days-range 15 30 表示检查过去 15 至 30 天的论文)"
     )
     parser.add_argument(
         "--from-date",
         type=str,
         default=None,
-        help="显式指定查询开始日期 (YYYY-MM-DD)"
+        help="显式指定扫描/查询开始日期 (YYYY-MM-DD)"
     )
     parser.add_argument(
         "--to-date",
         type=str,
         default=None,
-        help="显式指定查询结束日期 (YYYY-MM-DD)"
+        help="显式指定扫描/查询结束日期 (YYYY-MM-DD)"
     )
     parser.add_argument(
         "--max-workers",
@@ -110,7 +119,24 @@ def parse_args():
     parser.add_argument(
         "--all-journals",
         action="store_true",
-        help="补录 constants.py 中的全部 15 本期刊，而不仅限于 IEEE 期刊"
+        default=True,
+        help="补录 constants.py 中的全部 15 本期刊 (默认开启)"
+    )
+    parser.add_argument(
+        "--ieee-only",
+        action="store_true",
+        help="仅补录 IEEE 目标期刊（TGRS、JSTARS、GRSL）"
+    )
+    parser.add_argument(
+        "--journals",
+        type=str,
+        default=None,
+        help="以逗号分隔指定补录的期刊名称 (例如: 'TGRS,ISPRS,RSE')"
+    )
+    parser.add_argument(
+        "--skip-db-sync",
+        action="store_true",
+        help="跳过后续 statistics.db 数据库关键词与统计图谱的同步"
     )
     parser.add_argument(
         "--only-sync",
@@ -125,8 +151,23 @@ def parse_args():
     return parser.parse_args()
 
 
+def get_target_journals(args) -> List[Dict]:
+    """根据参数解析出待补录的目标期刊列表"""
+    if args.journals:
+        names = [n.strip().upper() for n in args.journals.split(",") if n.strip()]
+        selected = [j for j in JOURNALS if j["name"].upper() in names or j["category"].upper() in names]
+        if selected:
+            return selected
+        print(f"⚠️ 指定的期刊名称未匹配到预设期刊，将使用全部期刊。指定值: {args.journals}", file=sys.stderr)
+
+    if args.ieee_only:
+        return IEEE_JOURNAL_TARGETS
+
+    return JOURNALS
+
+
 def get_existing_dates() -> List[str]:
-    """获取 data/ 目录下所有已存在的日期列表"""
+    """获取 data/ 目录下所有已存在的日期列表 (按升序排列)"""
     data_dir = os.path.join(PROJECT_ROOT, "data")
     if not os.path.exists(data_dir):
         return []
@@ -138,6 +179,30 @@ def get_existing_dates() -> List[str]:
         if match:
             dates.add(match.group(1))
     return sorted(list(dates))
+
+
+def get_target_dates(args) -> List[str]:
+    """根据命令行参数过滤出待处理的目标日期列表"""
+    if args.date:
+        return [args.date]
+
+    all_dates = sorted(get_existing_dates())
+    if not all_dates:
+        return []
+
+    if args.days_range:
+        min_days, max_days = sorted(args.days_range)
+        today_dt = datetime.now().date()
+        from_dt = today_dt - timedelta(days=max_days)
+        to_dt = today_dt - timedelta(days=min_days)
+        return [d for d in all_dates if from_dt <= datetime.strptime(d, "%Y-%m-%d").date() <= to_dt]
+
+    if args.from_date and args.to_date:
+        from_dt = datetime.strptime(args.from_date, "%Y-%m-%d").date()
+        to_dt = datetime.strptime(args.to_date, "%Y-%m-%d").date()
+        return [d for d in all_dates if from_dt <= datetime.strptime(d, "%Y-%m-%d").date() <= to_dt]
+
+    return all_dates
 
 
 def load_existing_ids(filepath: str) -> Set[str]:
@@ -339,7 +404,7 @@ def enhance_papers_with_ai(
     return enhanced_results
 
 
-def sync_database_stats(modified_dates: List[str] = None):
+def sync_database_stats():
     """补录完成后自动提取关键词并同步更新 statistics.db 本地数据库"""
     try:
         from server_modules.processor import reextract_all_keywords, scan_and_process_files
@@ -354,7 +419,6 @@ def sync_database_stats(modified_dates: List[str] = None):
         print(f"⚠️ 同步统计数据库时跳过或遇到警告: {e}")
 
 
-
 def main():
     args = parse_args()
     
@@ -362,13 +426,15 @@ def main():
     language = args.language or os.environ.get("LANGUAGE", "Chinese")
     api_key = os.environ.get("OPENALEX_API_KEY", "")
     
-    journals_to_crawl = JOURNALS if args.all_journals else IEEE_JOURNAL_TARGETS
+    journals_to_crawl = get_target_journals(args)
     journal_names = [j["name"] for j in journals_to_crawl]
     
     print("=" * 70)
-    print("🚀 IEEE / 遥感期刊论文补录与 AI 增强工具")
-    print(f"🎯 目标期刊: {', '.join(journal_names)}")
+    print("🚀 期刊论文补录与 AI 增强工具 (All Journals Backfill)")
+    print(f"🎯 目标期刊 ({len(journals_to_crawl)} 本): {', '.join(journal_names)}")
     print(f"🤖 AI 模型: {model_name} | 目标语言: {language} | 并发数: {args.max_workers}")
+    if args.dry_run:
+        print("🔍 运行模式: [试运行模式 (Dry Run)]")
     print("=" * 70)
 
     if args.only_sync:
@@ -377,21 +443,19 @@ def main():
         print("=" * 70)
         return
 
-    # 确定待处理日期列表，并按时间升序排列（先处理早的日期，再处理晚的日期）
-    if args.date:
-        dates_to_process = [args.date]
-    else:
-        dates_to_process = sorted(get_existing_dates())
+    # 确定待处理日期列表，并按时间升序排列
+    dates_to_process = get_target_dates(args)
 
     if not dates_to_process:
-        print("❌ 未发现可处理的日期文件。请检查 data/ 目录或通过 --date 指定。")
+        print("❌ 未发现符合条件的日期文件。请检查 data/ 目录或通过 --date / --days-range 指定。")
         return
 
     print(f"📅 发现待检查/补录的本地日期 ({len(dates_to_process)} 个，按时间顺序处理): {', '.join(dates_to_process)}")
     
     # 记录跨日期全局见过的 ID/DOI（包含本地历史数据所有已存在的论文），防止跨日期重复添加同一篇论文
+    all_local_dates = get_existing_dates()
     global_seen_ids = set()
-    for d in dates_to_process:
+    for d in all_local_dates:
         raw_path = os.path.join(PROJECT_ROOT, "data", f"{d}.jsonl")
         global_seen_ids.update(load_existing_ids(raw_path))
 
@@ -407,7 +471,7 @@ def main():
         
         current_file_ids = load_existing_ids(raw_file)
         
-        # 计算该日期对应的时间查询窗口
+        # 计算该日期对应的时间查询窗口（默认以该日期为基准前推 7 天至前 1 天）
         if args.from_date and args.to_date:
             from_date = args.from_date
             to_date = args.to_date
@@ -479,7 +543,6 @@ def main():
 
         # 3. 追加到 AI 增强 jsonl 文件
         if enhanced_items:
-            # 建立已存在 enhanced ID 防止重复
             existing_enhanced_ids = load_existing_ids(enhanced_file)
             appended_ai_count = 0
             with open(enhanced_file, "a", encoding="utf-8") as f:
@@ -493,7 +556,7 @@ def main():
             total_backfilled_ai += appended_ai_count
 
     # 4. 同步数据库
-    if total_backfilled_raw > 0 and not args.dry_run:
+    if total_backfilled_raw > 0 and not args.dry_run and not args.skip_db_sync:
         sync_database_stats()
 
     print("\n" + "=" * 70)

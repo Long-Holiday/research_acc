@@ -1,7 +1,11 @@
 import os
+import sys
 import json
 import tempfile
 import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from fix_missing_abstracts import (
     is_abstract_missing,
     extract_identifiers,
