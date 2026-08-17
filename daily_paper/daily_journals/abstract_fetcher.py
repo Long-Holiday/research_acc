@@ -28,6 +28,7 @@ def clean_crossref_abstract(xml_abstract: Optional[str]) -> str:
     if not xml_abstract:
         return ""
     clean_text = re.sub(r'<[^>]+>', ' ', str(xml_abstract))
+    clean_text = re.sub(r'\s+([.,;:!?])', r'\1', clean_text)
     clean_text = re.sub(r'\s+', ' ', clean_text).strip()
     return clean_text
 
