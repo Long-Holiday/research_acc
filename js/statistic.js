@@ -132,8 +132,17 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   checkScreenSize();
-  // Recheck on window resize
-  window.addEventListener('resize', checkScreenSize);
+  // Recheck on window resize and redraw quadrant chart
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    checkScreenSize();
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (window.currentQuadrantKeywords) {
+        drawQuadrantChart(window.currentQuadrantKeywords);
+      }
+    }, 200);
+  });
 
   initEventListeners();
   initHotPapers();
@@ -1350,6 +1359,9 @@ function changeTrendYType(type) {
   if (window.updateTrendChart) {
     window.updateTrendChart();
   }
+  if (window.currentQuadrantKeywords) {
+    drawQuadrantChart(window.currentQuadrantKeywords);
+  }
 }
 
 function updateTrendYUI(type) {
@@ -1939,6 +1951,8 @@ function drawQuadrantChart(keywords) {
   if (!container) return;
   container.innerHTML = '';
 
+  window.currentQuadrantKeywords = keywords;
+
   const excludedSet = new Set(getExcludedKeywords());
   const validKeywords = (keywords || []).filter(kw => !excludedSet.has(kw.keyword));
 
@@ -1978,47 +1992,94 @@ function drawQuadrantChart(keywords) {
     };
   });
 
-  const rawWidth = container.offsetWidth || 500;
-  const rawHeight = container.offsetHeight || 460;
+  const rawWidth = container.clientWidth || container.offsetWidth || 500;
+  const rawHeight = container.clientHeight || container.offsetHeight || 480;
 
-  const margin = { top: 35, right: 35, bottom: 45, left: 50 };
-  const width = Math.max(200, rawWidth - margin.left - margin.right);
-  const height = Math.max(200, rawHeight - margin.top - margin.bottom);
+  // 预留足够边距，防止四周气泡和文字被截断
+  const margin = { top: 38, right: 48, bottom: 48, left: 56 };
+  const width = Math.max(240, rawWidth - margin.left - margin.right);
+  const height = Math.max(220, rawHeight - margin.top - margin.bottom);
 
   const svg = d3.select(container)
     .append('svg')
-      .attr('width', rawWidth)
-      .attr('height', rawHeight)
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('viewBox', `0 0 ${rawWidth} ${rawHeight}`)
+      .attr('preserveAspectRatio', 'xMidYMid meet')
     .append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`);
 
   // 计算 X 轴和 Y 轴刻度范围与动态中位数分割线
   const xExtent = d3.extent(scatterData, d => d.valueX);
-  const xMin = Math.max(0, (xExtent[0] || 0) * 0.8);
-  const xMax = (xExtent[1] || 10) * 1.15;
+  // X 轴起点从 0 开始，确保左侧气泡不会跨越 Y 轴或被裁切
+  const xMin = 0;
+  const xMax = (xExtent[1] || 10) * 1.12 + (currentTrendYType === 'count' ? 1.5 : 0.5);
 
   const yExtent = d3.extent(scatterData, d => d.growth_percent);
-  let yMin = Math.min(-20, (yExtent[0] || 0) - 10);
-  let yMax = Math.max(20, (yExtent[1] || 0) + 10);
+  const ySpan = Math.max(30, (yExtent[1] || 0) - (yExtent[0] || 0));
+  let yMin = Math.min(-15, (yExtent[0] || 0) - ySpan * 0.15 - 5);
+  let yMax = Math.max(15, (yExtent[1] || 0) + ySpan * 0.15 + 5);
 
   const xScale = d3.scaleLinear().domain([xMin, xMax]).nice().range([0, width]);
   const yScale = d3.scaleLinear().domain([yMin, yMax]).nice().range([height, 0]);
 
-  // 使用中位数（Median）作为 X 轴中轴分割线，彻底消除高频离群值拉偏坐标系
+  // 使用中位数（Median）作为 X 轴中轴分割线
   const medianX = d3.median(scatterData, d => d.valueX);
   const midX = (medianX !== undefined && medianX > xMin && medianX < xMax) ? medianX : ((xMin + xMax) / 2);
-  const midY = 0; // 0% 增长率线为分割
+  const midXPixel = Math.max(0, Math.min(width, xScale(midX)));
+  const midYPixel = Math.max(0, Math.min(height, yScale(0))); // 0% 增长率基准线
 
   // 1. 绘制四个象限背景块
   const quadrants = [
-    { x: xScale(midX), y: 0, w: width - xScale(midX), h: yScale(midY), color: 'rgba(240, 253, 244, 0.45)', label: '🌟 核心主流 (Hot Mainstream)', textColor: '#15803d' },
-    { x: 0, y: 0, w: xScale(midX), h: yScale(midY), color: 'rgba(239, 246, 255, 0.45)', label: '🚀 新兴趋势 (Emerging)', textColor: '#1d4ed8' },
-    { x: 0, y: yScale(midY), w: xScale(midX), h: height - yScale(midY), color: 'rgba(248, 250, 252, 0.45)', label: '💤 边缘/低频 (Low Focus)', textColor: '#64748b' },
-    { x: xScale(midX), y: yScale(midY), w: width - xScale(midX), h: height - yScale(midY), color: 'rgba(255, 241, 242, 0.45)', label: '📉 关注减退 (Cooling Down)', textColor: '#be123c' }
+    {
+      x: midXPixel, y: 0,
+      w: width - midXPixel, h: midYPixel,
+      color: 'rgba(240, 253, 244, 0.55)',
+      label: '🌟 核心主流',
+      enLabel: 'Hot Mainstream',
+      textColor: '#15803d',
+      badgeX: width - 12,
+      badgeY: 14,
+      anchor: 'end'
+    },
+    {
+      x: 0, y: 0,
+      w: midXPixel, h: midYPixel,
+      color: 'rgba(239, 246, 255, 0.55)',
+      label: '🚀 新兴趋势',
+      enLabel: 'Emerging',
+      textColor: '#1d4ed8',
+      badgeX: 12,
+      badgeY: 14,
+      anchor: 'start'
+    },
+    {
+      x: 0, y: midYPixel,
+      w: midXPixel, h: height - midYPixel,
+      color: 'rgba(248, 250, 252, 0.55)',
+      label: '💤 边缘/低频',
+      enLabel: 'Low Focus',
+      textColor: '#475569',
+      badgeX: 12,
+      badgeY: height - 12,
+      anchor: 'start'
+    },
+    {
+      x: midXPixel, y: midYPixel,
+      w: width - midXPixel, h: height - midYPixel,
+      color: 'rgba(255, 241, 242, 0.55)',
+      label: '📉 关注减退',
+      enLabel: 'Cooling Down',
+      textColor: '#be123c',
+      badgeX: width - 12,
+      badgeY: height - 12,
+      anchor: 'end'
+    }
   ];
 
   quadrants.forEach(q => {
     if (q.w > 0 && q.h > 0) {
+      // 象限底色
       svg.append('rect')
         .attr('x', q.x)
         .attr('y', q.y)
@@ -2027,31 +2088,38 @@ function drawQuadrantChart(keywords) {
         .attr('fill', q.color)
         .attr('rx', 4);
 
+      // 象限徽章
+      const isBottom = q.badgeY > height / 2;
+      const textY = isBottom ? q.badgeY - 4 : q.badgeY + 10;
+
       svg.append('text')
-        .attr('x', q.x + 10)
-        .attr('y', q.y + 18)
-        .style('font-size', '12px')
+        .attr('class', 'quadrant-label')
+        .attr('x', q.badgeX)
+        .attr('y', textY)
+        .attr('text-anchor', q.anchor)
+        .style('font-size', '11px')
         .style('font-weight', '700')
         .style('fill', q.textColor)
         .style('opacity', 0.85)
-        .text(q.label);
+        .style('pointer-events', 'none')
+        .text(`${q.label} (${q.enLabel})`);
     }
   });
 
   // 2. 绘制中轴分割线
   svg.append('line')
-    .attr('x1', xScale(midX)).attr('y1', 0)
-    .attr('x2', xScale(midX)).attr('y2', height)
+    .attr('x1', midXPixel).attr('y1', 0)
+    .attr('x2', midXPixel).attr('y2', height)
     .style('stroke', '#94a3b8').style('stroke-dasharray', '4,4').style('stroke-width', '1.5');
 
   svg.append('line')
-    .attr('x1', 0).attr('y1', yScale(midY))
-    .attr('x2', width).attr('y2', yScale(midY))
+    .attr('x1', 0).attr('y1', midYPixel)
+    .attr('x2', width).attr('y2', midYPixel)
     .style('stroke', '#94a3b8').style('stroke-dasharray', '4,4').style('stroke-width', '1.5');
 
   // 3. 坐标轴
-  const xAxis = d3.axisBottom(xScale).ticks(5);
-  const yAxis = d3.axisLeft(yScale).ticks(5).tickFormat(d => d + '%');
+  const xAxis = d3.axisBottom(xScale).ticks(6);
+  const yAxis = d3.axisLeft(yScale).ticks(6).tickFormat(d => d + '%');
 
   svg.append('g')
     .attr('transform', `translate(0,${height})`)
@@ -2065,29 +2133,48 @@ function drawQuadrantChart(keywords) {
   // X/Y 轴说明文本
   svg.append('text')
     .attr('x', width / 2)
-    .attr('y', height + 36)
+    .attr('y', height + 38)
     .style('text-anchor', 'middle')
     .style('font-size', '11px')
+    .style('font-weight', '500')
     .style('fill', '#64748b')
     .text(currentTrendYType === 'count' ? '热度/频次 (Count) →' : '出现频率 (Rate %) →');
 
   svg.append('text')
     .attr('transform', 'rotate(-90)')
     .attr('x', -height / 2)
-    .attr('y', -36)
+    .attr('y', -40)
     .style('text-anchor', 'middle')
     .style('font-size', '11px')
+    .style('font-weight', '500')
     .style('fill', '#64748b')
     .text('近期增长率 (Growth %) →');
 
-  // 4. 使用 D3 力导向防重叠碰撞微调，避免近距离文字和圆点重叠
+  // 4. 散点节点数据初始化
+  scatterData.forEach(d => {
+    d.radius = Math.max(6, Math.min(15, Math.sqrt(d.count) * 2.0 + 2));
+    d.targetX = xScale(d.valueX);
+    d.targetY = yScale(d.growth_percent);
+    d.x = d.targetX;
+    d.y = d.targetY;
+  });
+
+  // 使用 D3 力导向防重叠碰撞，结合严格的边界保护
   const simulation = d3.forceSimulation(scatterData)
-    .force('x', d3.forceX(d => xScale(d.valueX)).strength(0.85))
-    .force('y', d3.forceY(d => yScale(d.growth_percent)).strength(0.85))
-    .force('collide', d3.forceCollide(d => Math.max(12, Math.min(24, Math.sqrt(d.count) * 2.2 + 6))).iterations(4))
+    .force('x', d3.forceX(d => d.targetX).strength(0.85))
+    .force('y', d3.forceY(d => d.targetY).strength(0.85))
+    .force('collide', d3.forceCollide(d => d.radius + 6).iterations(3))
     .stop();
 
-  for (let i = 0; i < 120; ++i) simulation.tick();
+  for (let i = 0; i < 100; ++i) {
+    simulation.tick();
+    // 严格的坐标限制：确保所有圆点及标签永远留在图表安全区域内
+    scatterData.forEach(d => {
+      const pad = d.radius + 4;
+      d.x = Math.max(pad, Math.min(width - pad, d.x));
+      d.y = Math.max(pad, Math.min(height - pad, d.y));
+    });
+  }
 
   // 5. 浮动 Tooltip
   const tooltip = d3.select(container).append('div')
@@ -2097,7 +2184,7 @@ function drawQuadrantChart(keywords) {
     .style('pointer-events', 'none')
     .style('opacity', 0);
 
-  // 6. 绘制散点节点与文本
+  // 6. 绘制散点节点与智能文本
   const nodes = svg.selectAll('.quadrant-node')
     .data(scatterData)
     .enter()
@@ -2107,52 +2194,68 @@ function drawQuadrantChart(keywords) {
     .style('cursor', 'pointer');
 
   nodes.append('circle')
-    .attr('r', d => Math.max(6, Math.min(16, Math.sqrt(d.count) * 2.2)))
+    .attr('r', d => d.radius)
     .style('fill', d => {
-      if (d.growth_percent > 0 && d.valueX >= midX) return '#10b981'; // 绿
-      if (d.growth_percent > 0 && d.valueX < midX) return '#2563eb';  // 蓝
-      if (d.growth_percent <= 0 && d.valueX >= midX) return '#ef4444'; // 红
-      return '#64748b'; // 灰
+      if (d.growth_percent > 0 && d.valueX >= midX) return '#10b981'; // 核心主流：绿
+      if (d.growth_percent > 0 && d.valueX < midX) return '#2563eb';  // 新兴趋势：蓝
+      if (d.growth_percent <= 0 && d.valueX >= midX) return '#ef4444'; // 关注减退：红
+      return '#64748b'; // 边缘/低频：灰
     })
     .style('opacity', 0.9)
     .style('stroke', '#ffffff')
     .style('stroke-width', 2);
 
+  // 智能文本方向与对齐：靠近右边界时文本向左展开，避免溢出；靠左/中间时文本向右展开
   nodes.append('text')
-    .attr('x', 9)
-    .attr('y', 4)
+    .attr('x', d => {
+      const isRightEdge = d.x > width * 0.72;
+      return isRightEdge ? (-d.radius - 5) : (d.radius + 5);
+    })
+    .attr('y', d => {
+      if (d.y < 16) return 10;
+      if (d.y > height - 12) return -2;
+      return 4;
+    })
+    .attr('text-anchor', d => (d.x > width * 0.72 ? 'end' : 'start'))
     .style('font-size', '11px')
     .style('font-weight', '600')
     .style('fill', '#0f172a')
     .style('paint-order', 'stroke fill')
-    .style('stroke', '#ffffff')
-    .style('stroke-width', '3px')
+    .style('stroke', 'rgba(255, 255, 255, 0.95)')
+    .style('stroke-width', '3.5px')
     .style('stroke-linejoin', 'round')
     .style('pointer-events', 'none')
     .text(d => d.keyword);
 
   nodes.on('mouseover', function(event, d) {
-    // 移至最上层，避免被其他点覆盖
     this.parentNode.appendChild(this);
     
-    d3.select(this).select('circle').attr('r', d => Math.max(9, Math.min(20, Math.sqrt(d.count) * 2.5))).style('opacity', 1);
+    d3.select(this).select('circle')
+      .transition().duration(150)
+      .attr('r', d.radius * 1.35)
+      .style('opacity', 1);
+
     tooltip.transition().duration(100).style('opacity', 0.95);
 
-    let quadTag = d.growth_percent > 0 ? (d.valueX >= midX ? '🌟 核心主流' : '🚀 新兴趋势') : (d.valueX >= midX ? '📉 关注减退' : '💤 边缘/低频');
-    let content = `
-      <div style="font-weight:bold;margin-bottom:4px;">${d.keyword}</div>
-      <div style="font-size:12px;margin-bottom:2px;">定位: <span style="color:#38bdf8;font-weight:500;">${quadTag}</span></div>
-      <div style="font-size:12px;margin-bottom:2px;">频次: ${Math.round(d.count)} | 频率: ${(d.rate*100).toFixed(2)}%</div>
+    const quadTag = d.growth_percent > 0 ? (d.valueX >= midX ? '🌟 核心主流' : '🚀 新兴趋势') : (d.valueX >= midX ? '📉 关注减退' : '💤 边缘/低频');
+    const content = `
+      <div style="font-weight:bold;margin-bottom:4px;font-size:13px;">${d.keyword}</div>
+      <div style="font-size:12px;margin-bottom:2px;">象限定位: <span style="color:#38bdf8;font-weight:600;">${quadTag}</span></div>
+      <div style="font-size:12px;margin-bottom:2px;">频次: <b>${Math.round(d.count)}</b> | 频率: <b>${(d.rate * 100).toFixed(2)}%</b></div>
       <div style="font-size:12px;">增长率: <span style="color:${d.growth_percent >= 0 ? '#4ade80' : '#f87171'};font-weight:bold;">${d.growth_percent >= 0 ? '+' : ''}${d.growth_percent}%</span></div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;border-top:1px solid rgba(255,255,255,0.15);padding-top:3px;">点击查看相关论文</div>
     `;
     tooltip.html(content);
   })
   .on('mousemove', function(event) {
     const matrix = d3.pointer(event, container);
-    tooltip.style('left', (matrix[0] + 15) + 'px').style('top', (matrix[1] - 40) + 'px');
+    tooltip.style('left', (matrix[0] + 15) + 'px').style('top', (matrix[1] - 45) + 'px');
   })
-  .on('mouseout', function() {
-    d3.select(this).select('circle').attr('r', d => Math.max(6, Math.min(16, Math.sqrt(d.count) * 2.2))).style('opacity', 0.9);
+  .on('mouseout', function(event, d) {
+    d3.select(this).select('circle')
+      .transition().duration(150)
+      .attr('r', d.radius)
+      .style('opacity', 0.9);
     tooltip.transition().duration(100).style('opacity', 0);
   })
   .on('click', function(event, d) {
