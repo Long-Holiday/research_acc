@@ -94,8 +94,9 @@ def get_nlp():
     if not nlp_loaded:
         try:
             import spacy
-            # 仅加载分词和词性、词形还原、依存句法，禁用其余耗内存组件
+            # 仅加载分词和词性、词形还原、依存句法（用于 noun_chunks），禁用其余耗内存组件
             nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
+            nlp.max_length = 50000
         except Exception as e:
             print(f"Failed to load spaCy model 'en_core_web_sm': {e}")
             nlp = None
@@ -170,22 +171,47 @@ def canonicalize_keyword(term: str, acronym_map: Optional[Dict[str, str]] = None
     return clean_lower
 
 
-def extract_candidates_cvalue(title: str, summary: str = "", active_nlp = None) -> Tuple[Dict[str, float], Dict[str, str]]:
+def extract_candidates_cvalue(
+    title: str,
+    summary: str = "",
+    active_nlp = None,
+    doc_title = None,
+    doc_summary = None
+) -> Tuple[Dict[str, float], Dict[str, str]]:
     """
     使用轻量级句法分析 + C-Value (Nested Term Specificity) 算法抽取高特异度复合术语与关键概念。
     专为 CPU 优化，零 GPU 依赖，内存极低。
+    支持直接传入已解析好的 doc_title 与 doc_summary（支持 pipe 批处理）。
     """
     candidates_tf = {}
     raw_representations = {}
     
-    texts = [(title, 3.0), (summary, 1.0)]
+    # 长度安全保护：防止极端长文本导致卡死
+    title = (title or "")[:500]
+    summary = (summary or "")[:3000]
     
-    for text, weight in texts:
-        if not text:
+    doc_pairs = []
+    if doc_title is not None or doc_summary is not None:
+        if doc_title is not None and title:
+            doc_pairs.append((doc_title, 3.0))
+        if doc_summary is not None and summary:
+            doc_pairs.append((doc_summary, 1.0))
+    elif active_nlp is not None:
+        if title:
+            try:
+                doc_pairs.append((active_nlp(title), 3.0))
+            except Exception:
+                pass
+        if summary:
+            try:
+                doc_pairs.append((active_nlp(summary), 1.0))
+            except Exception:
+                pass
+    
+    for doc, weight in doc_pairs:
+        if doc is None:
             continue
         try:
-            doc = active_nlp(text)
-            
             # 1. 抽取名词块与复合学术术语
             for chunk in doc.noun_chunks:
                 tokens = []
@@ -214,12 +240,14 @@ def extract_candidates_cvalue(title: str, summary: str = "", active_nlp = None) 
                     candidates_tf[w_lower] = candidates_tf.get(w_lower, 0.0) + weight
                     if w_lower not in raw_representations:
                         raw_representations[w_lower] = t.text
-        except Exception as e:
+        except Exception:
             pass
             
     # C-Value 嵌套扣减计算
     # C-Value(a) = log2(|a|) * (TF(a) - 1/|T_a| * sum_{b in T_a} TF(b))
-    sorted_terms = sorted(candidates_tf.keys(), key=lambda x: len(x.split()), reverse=True)
+    # 限制参与双层嵌套计算的最多前 120 个候选词，避免长尾词进行 O(N^2) 耗时计算
+    sorted_all_terms = sorted(candidates_tf.keys(), key=lambda x: len(x.split()), reverse=True)
+    sorted_terms = sorted_all_terms[:120]
     cvalue_scores = {}
     nested_parent_map = {}
     
@@ -247,36 +275,15 @@ def extract_candidates_cvalue(title: str, summary: str = "", active_nlp = None) 
     return cvalue_scores, raw_representations
 
 
-def extract_keywords(title: str, summary: str = "", idf_map: dict = None) -> list:
-    """
-    提取单篇论文的高质量关键词（兼具准确性、语义归一化与极速 CPU 推理）。
-    
-    :param title: 论文标题
-    :param summary: 论文摘要
-    :param idf_map: 逆文档频率映射
-    :return: 归一化后的 Top 关键词列表 [(canonical_keyword, score), ...]
-    """
-    title = title or ""
-    summary = summary or ""
-    full_text = f"{title} {summary}"
-    
-    global idf_cache, idf_doc_count
-    active_idf = idf_map if idf_map is not None else idf_cache
-    default_idf = math.log((1 + idf_doc_count) / 2) + 1 if idf_doc_count > 0 else 1.0
-    
-    # 1. 抽取文内缩写对齐表
-    acronym_map = extract_abbreviations_schwartz_hearst(full_text)
-    
-    active_nlp = get_nlp()
-    candidates_scores = {}
-    raw_map = {}
-    
-    if active_nlp is not None:
-        try:
-            candidates_scores, raw_map = extract_candidates_cvalue(title, summary, active_nlp)
-        except Exception:
-            candidates_scores, raw_map = {}, {}
-            
+def _process_candidate_scores_to_keywords(
+    candidates_scores: dict,
+    raw_map: dict,
+    full_text: str,
+    acronym_map: dict,
+    active_idf: dict,
+    default_idf: float
+) -> list:
+    """内部通用函数：将候选打分、缩写与 IDF 加权聚合成最终 Top 10 关键词。"""
     # Fallback 快速规则抽取
     if not candidates_scores:
         cleaned = re.sub(r"[^\w\s-]", " ", full_text.lower())
@@ -284,7 +291,7 @@ def extract_keywords(title: str, summary: str = "", idf_map: dict = None) -> lis
         for i in range(len(words)):
             for l in range(1, min(4, len(words) - i + 1)):
                 phrase = " ".join(words[i:i+l])
-                candidates_scores[phrase] = candidates_scores.get(phrase, 0.0) + (3.0 if phrase in title.lower() else 1.0)
+                candidates_scores[phrase] = candidates_scores.get(phrase, 0.0) + (3.0 if phrase in full_text.lower() else 1.0)
                 raw_map[phrase] = phrase
 
     # 结合全局 IDF 加权与实体规范化 (Canonical Normalization)
@@ -306,3 +313,120 @@ def extract_keywords(title: str, summary: str = "", idf_map: dict = None) -> lis
     # 排序输出 Top 10
     result = sorted(canonical_aggregated.items(), key=lambda x: x[1], reverse=True)
     return result[:10]
+
+
+def extract_keywords(title: str, summary: str = "", idf_map: dict = None) -> list:
+    """
+    提取单篇论文的高质量关键词（兼具准确性、语义归一化与极速 CPU 推理）。
+    
+    :param title: 论文标题
+    :param summary: 论文摘要
+    :param idf_map: 逆文档频率映射
+    :return: 归一化后的 Top 关键词列表 [(canonical_keyword, score), ...]
+    """
+    title = (title or "")[:500]
+    summary = (summary or "")[:3000]
+    full_text = f"{title} {summary}"
+    
+    global idf_cache, idf_doc_count
+    active_idf = idf_map if idf_map is not None else idf_cache
+    default_idf = math.log((1 + idf_doc_count) / 2) + 1 if idf_doc_count > 0 else 1.0
+    
+    # 1. 抽取文内缩写对齐表
+    acronym_map = extract_abbreviations_schwartz_hearst(full_text)
+    
+    active_nlp = get_nlp()
+    candidates_scores = {}
+    raw_map = {}
+    
+    if active_nlp is not None:
+        try:
+            candidates_scores, raw_map = extract_candidates_cvalue(title, summary, active_nlp=active_nlp)
+        except Exception:
+            candidates_scores, raw_map = {}, {}
+            
+    return _process_candidate_scores_to_keywords(
+        candidates_scores=candidates_scores,
+        raw_map=raw_map,
+        full_text=full_text,
+        acronym_map=acronym_map,
+        active_idf=active_idf,
+        default_idf=default_idf
+    )
+
+
+def extract_keywords_batch(
+    papers: List[Dict[str, str]],
+    idf_map: dict = None,
+    batch_size: int = 50
+) -> List[List[Tuple[str, float]]]:
+    """
+    高效批量提取多篇论文关键词。
+    利用 spaCy 的 nlp.pipe 批处理进行向量化分词与句法解析，大幅降低 CPU 负载并防止内存暴涨。
+    
+    :param papers: 包含 [{'title': ..., 'summary': ...}, ...] 的论文列表
+    :param idf_map: 逆文档频率映射
+    :param batch_size: 批处理大小（默认 50）
+    :return: 每篇论文对应的关键词列表
+    """
+    if not papers:
+        return []
+        
+    global idf_cache, idf_doc_count
+    active_idf = idf_map if idf_map is not None else idf_cache
+    default_idf = math.log((1 + idf_doc_count) / 2) + 1 if idf_doc_count > 0 else 1.0
+    
+    active_nlp = get_nlp()
+    
+    # 收集需要进行 NLP 处理的文本
+    # 每篇论文生成 2 个文本：title 和 summary
+    flat_texts = []
+    clean_papers = []
+    for p in papers:
+        t = (p.get("title", "") or "")[:500]
+        s = (p.get("summary", "") or "")[:3000]
+        clean_papers.append((t, s))
+        flat_texts.append(t if t else "")
+        flat_texts.append(s if s else "")
+        
+    docs_list = []
+    if active_nlp is not None:
+        try:
+            # 使用 nlp.pipe 批量并行解析
+            docs_list = list(active_nlp.pipe(flat_texts, batch_size=batch_size * 2, n_process=1))
+        except Exception as e:
+            print(f"Error during nlp.pipe in extract_keywords_batch: {e}")
+            docs_list = [None] * len(flat_texts)
+    else:
+        docs_list = [None] * len(flat_texts)
+        
+    results = []
+    for idx, (t, s) in enumerate(clean_papers):
+        full_text = f"{t} {s}"
+        acronym_map = extract_abbreviations_schwartz_hearst(full_text)
+        
+        doc_t = docs_list[idx * 2] if idx * 2 < len(docs_list) else None
+        doc_s = docs_list[idx * 2 + 1] if idx * 2 + 1 < len(docs_list) else None
+        
+        try:
+            candidates_scores, raw_map = extract_candidates_cvalue(
+                title=t,
+                summary=s,
+                active_nlp=None,
+                doc_title=doc_t,
+                doc_summary=doc_s
+            )
+        except Exception:
+            candidates_scores, raw_map = {}, {}
+            
+        kws = _process_candidate_scores_to_keywords(
+            candidates_scores=candidates_scores,
+            raw_map=raw_map,
+            full_text=full_text,
+            acronym_map=acronym_map,
+            active_idf=active_idf,
+            default_idf=default_idf
+        )
+        results.append(kws)
+        
+    return results

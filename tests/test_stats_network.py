@@ -92,3 +92,40 @@ def test_network_stats_keeps_cooccurrence_inside_the_requested_scope(tmp_path, m
 
     assert result["links"] == [{"source": "a", "target": "b", "value": 2}]
     assert {node["id"] for node in result["nodes"]} == {"a", "b"}
+
+
+def test_extract_keywords_batch():
+    import server_modules.keywords as keywords
+    
+    # 1. 空输入测试
+    assert keywords.extract_keywords_batch([]) == []
+    
+    # 2. 批量输入测试
+    papers = [
+        {
+            "title": "Vision Transformer in Remote Sensing",
+            "summary": "This paper presents a Vision Transformer (ViT) approach for change detection in high resolution remote sensing imagery."
+        },
+        {
+            "title": "Diffusion Models for Super-Resolution",
+            "summary": "We propose a diffusion model framework for optical satellite super-resolution."
+        }
+    ]
+    results = keywords.extract_keywords_batch(papers, batch_size=2)
+    assert len(results) == 2
+    
+    # 验证第一篇提取了 ViT / Vision Transformer 或 remote sensing 关键词
+    first_kws = [kw for kw, score in results[0]]
+    assert any("vision transformer" in k or "transformer" in k or "remote sensing" in k or "vit" in k or "change detection" in k for k in first_kws)
+    
+    # 验证第二篇提取了 diffusion model 或 super-resolution 关键词
+    second_kws = [kw for kw, score in results[1]]
+    assert any("diffusion" in k or "super-resolution" in k or "satellite" in k for k in second_kws)
+    
+    # 3. 超长文本截断健壮性测试
+    long_paper = [{
+        "title": "A " * 2000,
+        "summary": "Diffusion Model " * 2000
+    }]
+    long_res = keywords.extract_keywords_batch(long_paper, batch_size=1)
+    assert len(long_res) == 1

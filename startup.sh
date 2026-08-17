@@ -11,10 +11,15 @@ PID_FILE=".server.pid"
 
 # 获取脚本所在目录，确保在项目根目录下执行
 # Get the directory of this script, ensure execution in the project root
-cd "$(dirname "$0")"
-
 # 获取项目的绝对路径
 PROJECT_DIR="$(pwd)"
+
+# 限制底层科学计算库单线程，防止多核抢占导致小内存云主机 CPU 100% 假死
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
 # 1. 每日爬取与 AI 研报定时任务 (每天凌晨 4:09 自动执行)
 CRON_SCHEDULE_CRAWL="9 4 * * *"

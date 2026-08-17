@@ -14,11 +14,19 @@ from server_modules.papers import router as papers_router
 from server_modules.stats import router as stats_router
 from server_modules.advisor import router as advisor_router
 
+# 限制底层科学计算库单线程，防止多核抢占导致 CPU 100% 假死
+for thread_env in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"]:
+    os.environ.setdefault(thread_env, "1")
+
+_periodic_scan_lock = asyncio.Lock()
+
 async def periodic_file_scan():
     while True:
         try:
-            # 5分钟扫描一次新文件，在独立线程运行以免阻塞事件循环
-            await asyncio.to_thread(scan_and_process_files)
+            # 5分钟扫描一次新文件，使用锁避免任务重叠堆积
+            if not _periodic_scan_lock.locked():
+                async with _periodic_scan_lock:
+                    await asyncio.to_thread(scan_and_process_files)
         except Exception as e:
             print(f"Error during background periodic scanning: {e}")
         await asyncio.sleep(300)

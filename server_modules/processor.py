@@ -95,13 +95,25 @@ def _init_tables(cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_papers_date_lang ON papers (paper_date, language)")
 
 
+def get_db_path():
+    import app.config as config
+    if hasattr(config, "DB_PATH") and config.DB_PATH != "data/statistics.db":
+        return config.DB_PATH
+    import server
+    if hasattr(server, "DB_PATH") and getattr(server, "DB_PATH") != "data/statistics.db":
+        return getattr(server, "DB_PATH")
+    return DB_PATH
+
+_scan_lock = threading.Lock()
+
 def scan_and_process_files():
     global cache_initialized
     import sys
     is_testing = "pytest" in sys.modules or "unittest" in sys.modules
     db_dir = "data"
     os.makedirs(db_dir, exist_ok=True)
-    if is_testing or not os.path.exists(DB_PATH):
+    actual_db_path = get_db_path()
+    if is_testing or not os.path.exists(actual_db_path):
         processed_files_cache.clear()
         cache_initialized = False
     
@@ -118,189 +130,205 @@ def scan_and_process_files():
         new_files = [tf for tf in target_files if tf[0] not in processed_files_cache]
         if not new_files:
             return  # No new files to process! Skip entire database lock & queries.
-            
-    with db_lock:
-        conn = connect_db(DB_PATH)
-        try:
-            cursor = conn.cursor()
-            _init_tables(cursor)
-            conn.commit()
-            
-            # Load processed files into cache if not initialized
-            if not cache_initialized:
-                cursor.execute("SELECT filename FROM processed_files")
-                rows = cursor.fetchall()
-                for row in rows:
-                    processed_files_cache.add(row[0])
-                cache_initialized = True
-                
-            # Rebuild/refresh global IDF cache from existing papers using DB aggregate queries
+
+    with _scan_lock:
+        with db_lock:
+            conn = connect_db(actual_db_path)
             try:
-                cursor.execute("SELECT COUNT(*) FROM papers")
-                total_papers = cursor.fetchone()[0]
-                keywords.idf_doc_count = total_papers
-                
-                if total_papers > 0:
-                    cursor.execute("SELECT keyword, COUNT(DISTINCT paper_id) FROM paper_keywords GROUP BY keyword")
-                    df_rows = cursor.fetchall()
-                    keywords.idf_cache = {
-                        row[0].lower(): math.log((1 + total_papers) / (1 + row[1])) + 1
-                        for row in df_rows if row[0]
-                    }
-                else:
-                    keywords.idf_cache = {}
-            except Exception as idf_err:
-                print(f"Error initializing IDF cache: {idf_err}")
-                keywords.idf_cache = {}
-                keywords.idf_doc_count = 0
-                
-            # Filter files to process again inside lock
-            files_to_process = [tf for tf in target_files if tf[0] not in processed_files_cache]
-            
-            for filename, paper_date, lang in files_to_process:
-                cursor.execute("SELECT 1 FROM processed_files WHERE filename = ?", (filename,))
-                already_processed = cursor.fetchone() is not None
-                
-                cursor.execute("SELECT 1 FROM papers WHERE paper_date = ? AND language = ? LIMIT 1", (paper_date, lang))
-                already_in_papers = cursor.fetchone() is not None
-                
-                if already_processed and already_in_papers:
-                    processed_files_cache.add(filename)
-                    continue
-                    
-                filepath = os.path.join(db_dir, filename)
-                if not os.path.exists(filepath):
-                    continue
-                    
-                # 分块缓冲写入，避免一次性在内存中累积整批论文/关键词列表导致 OOM。
-                # keyword_stats 的 ON CONFLICT 累加是幂等的，分块多次插入结果一致。
-                CHUNK_PAPERS = 500
-                CHUNK_KEYWORDS = 2000
-
-                stats_map = {}
-                paper_keywords_buf = []
-                papers_buf = []
-
-                def flush_papers():
-                    if papers_buf:
-                        cursor.executemany(
-                            "INSERT OR REPLACE INTO papers (paper_id, paper_date, language, paper_json) VALUES (?, ?, ?, ?)",
-                            papers_buf
-                        )
-                        papers_buf.clear()
-
-                def flush_keywords():
-                    if paper_keywords_buf:
-                        cursor.executemany(
-                            "INSERT INTO paper_keywords (paper_id, paper_date, language, category, keyword) VALUES (?, ?, ?, ?, ?)",
-                            paper_keywords_buf
-                        )
-                        paper_keywords_buf.clear()
-
-                def flush_stats():
-                    if stats_map:
-                        rows = [
-                            (p_date, p_lang, p_cat, p_kw, freq)
-                            for (p_date, p_lang, p_cat, p_kw), freq in stats_map.items()
-                        ]
-                        cursor.executemany("""
-                        INSERT INTO keyword_stats (paper_date, language, category, keyword, frequency)
-                        VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT(paper_date, language, category, keyword)
-                        DO UPDATE SET frequency = frequency + excluded.frequency
-                        """, rows)
-                        stats_map.clear()
-
-                with open(filepath, "r", encoding="utf-8") as f_in:
-                    for line in f_in:
-                        line_str = line.strip()
-                        if not line_str:
-                            continue
-                        try:
-                            paper = json.loads(line_str)
-                        except Exception:
-                            continue
-                            
-                        paper_id = paper.get("id")
-                        if not paper_id:
-                            continue
-                        
-                        if not already_in_papers:
-                            papers_buf.append((paper_id, paper_date, lang, json.dumps(paper)))
-                            if len(papers_buf) >= CHUNK_PAPERS:
-                                flush_papers()
-                            
-                        if not already_processed:
-                            cats = paper.get("categories", [])
-                            category = "unknown"
-                            if isinstance(cats, list) and len(cats) > 0:
-                                category = cats[0]
-                            elif isinstance(cats, str):
-                                cats_split = re.split(r"[,\s]+", cats.strip())
-                                if cats_split and cats_split[0]:
-                                    category = cats_split[0]
-                                    
-                            title = paper.get("title", "")
-                            summary = paper.get("summary", "")
-                            
-                            # Extract keywords
-                            keywords_with_freq = keywords.extract_keywords(title, summary)
-                            
-                            # Merge OpenAlex concepts if available
-                            concepts = paper.get("concepts", [])
-                            if isinstance(concepts, list):
-                                for concept in concepts:
-                                    if concept and isinstance(concept, str):
-                                        # Normalize concept to lowercase and add it as a key term
-                                        keywords_with_freq.append((concept.lower(), 2))
-                            
-                            # Group same keywords in the same paper to avoid duplicate key violations
-                            unique_kws = {}
-                            for kw, freq in keywords_with_freq:
-                                unique_kws[kw] = unique_kws.get(kw, 0) + freq
-                                
-                            for kw, freq in unique_kws.items():
-                                paper_keywords_buf.append((paper_id, paper_date, lang, category, kw))
-                                key = (paper_date, lang, category, kw)
-                                stats_map[key] = stats_map.get(key, 0) + freq
-                                
-                            if len(paper_keywords_buf) >= CHUNK_KEYWORDS:
-                                flush_keywords()
-                                flush_stats()
-
-                flush_papers()
-                flush_keywords()
-                flush_stats()
-                    
-                if not already_processed:
-                    cursor.execute("INSERT OR REPLACE INTO processed_files (filename) VALUES (?)", (filename,))
-                
-                processed_files_cache.add(filename)
-                
-                # Incrementally update aggregation tables for the processed date, lang
-                cursor.execute("""
-                INSERT OR REPLACE INTO agg_daily_papers (paper_date, language, category, total_papers)
-                SELECT paper_date, language, category, COUNT(DISTINCT paper_id)
-                FROM paper_keywords
-                WHERE paper_date = ? AND language = ?
-                GROUP BY paper_date, language, category
-                """, (paper_date, lang))
-                
-                cursor.execute("""
-                INSERT OR REPLACE INTO agg_daily_keywords (paper_date, language, category, keyword, distinct_paper_count)
-                SELECT paper_date, language, category, keyword, COUNT(DISTINCT paper_id)
-                FROM paper_keywords
-                WHERE paper_date = ? AND language = ?
-                GROUP BY paper_date, language, category, keyword
-                """, (paper_date, lang))
-                
+                cursor = conn.cursor()
+                _init_tables(cursor)
                 conn.commit()
                 
-            # If any files were processed, we can optionally run a full refresh of the aggregation just in case, but incremental is faster.
-            # But just to be sure that the aggregations cover everything (e.g. if previous runs missed it), let's do a full refresh once when cache is initialized.
-            # Actually, doing it incrementally above is robust since we process all missing files.
-        finally:
-            conn.close()
+                # Load processed files into cache if not initialized
+                if not cache_initialized:
+                    cursor.execute("SELECT filename FROM processed_files")
+                    rows = cursor.fetchall()
+                    for row in rows:
+                        processed_files_cache.add(row[0])
+                    cache_initialized = True
+                    
+                # Rebuild/refresh global IDF cache from existing papers using DB aggregate queries
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM papers")
+                    total_papers = cursor.fetchone()[0]
+                    
+                    # 仅当未初始化或论文总数增长超过 10% 时才全表重建 IDF 缓存
+                    need_idf_refresh = not keywords.idf_cache or abs(total_papers - keywords.idf_doc_count) > max(50, keywords.idf_doc_count * 0.1)
+                    keywords.idf_doc_count = total_papers
+                    
+                    if need_idf_refresh and total_papers > 0:
+                        cursor.execute("SELECT keyword, COUNT(DISTINCT paper_id) FROM paper_keywords GROUP BY keyword")
+                        df_rows = cursor.fetchall()
+                        keywords.idf_cache = {
+                            row[0].lower(): math.log((1 + total_papers) / (1 + row[1])) + 1
+                            for row in df_rows if row[0]
+                        }
+                    elif total_papers == 0:
+                        keywords.idf_cache = {}
+                except Exception as idf_err:
+                    print(f"Error initializing IDF cache: {idf_err}")
+                    keywords.idf_cache = {}
+                    keywords.idf_doc_count = 0
+                    
+                # Filter files to process again inside lock
+                files_to_process = [tf for tf in target_files if tf[0] not in processed_files_cache]
+                
+                for filename, paper_date, lang in files_to_process:
+                    cursor.execute("SELECT 1 FROM processed_files WHERE filename = ?", (filename,))
+                    already_processed = cursor.fetchone() is not None
+                    
+                    cursor.execute("SELECT 1 FROM papers WHERE paper_date = ? AND language = ? LIMIT 1", (paper_date, lang))
+                    already_in_papers = cursor.fetchone() is not None
+                    
+                    if already_processed and already_in_papers:
+                        processed_files_cache.add(filename)
+                        continue
+                        
+                    filepath = os.path.join(db_dir, filename)
+                    if not os.path.exists(filepath):
+                        continue
+                        
+                    # 分块缓冲写入，避免一次性在内存中累积整批论文/关键词列表导致 OOM。
+                    CHUNK_PAPERS = 500
+                    CHUNK_KEYWORDS = 2000
+                    BATCH_NLP_SIZE = 50
+
+                    stats_map = {}
+                    paper_keywords_buf = []
+                    papers_buf = []
+
+                    def flush_papers():
+                        if papers_buf:
+                            cursor.executemany(
+                                "INSERT OR REPLACE INTO papers (paper_id, paper_date, language, paper_json) VALUES (?, ?, ?, ?)",
+                                papers_buf
+                            )
+                            papers_buf.clear()
+
+                    def flush_keywords():
+                        if paper_keywords_buf:
+                            cursor.executemany(
+                                "INSERT INTO paper_keywords (paper_id, paper_date, language, category, keyword) VALUES (?, ?, ?, ?, ?)",
+                                paper_keywords_buf
+                            )
+                            paper_keywords_buf.clear()
+
+                    def flush_stats():
+                        if stats_map:
+                            rows = [
+                                (p_date, p_lang, p_cat, p_kw, freq)
+                                for (p_date, p_lang, p_cat, p_kw), freq in stats_map.items()
+                            ]
+                            cursor.executemany("""
+                            INSERT INTO keyword_stats (paper_date, language, category, keyword, frequency)
+                            VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT(paper_date, language, category, keyword)
+                            DO UPDATE SET frequency = frequency + excluded.frequency
+                            """, rows)
+                            stats_map.clear()
+
+                    # 逐批读取与批量 NLP 分析
+                    current_batch = []
+                    
+                    def process_current_batch(batch_items):
+                        if not batch_items:
+                            return
+                            
+                        # 1. 批量提取关键词
+                        if not already_processed:
+                            batch_kws = keywords.extract_keywords_batch(batch_items, batch_size=BATCH_NLP_SIZE)
+                        else:
+                            batch_kws = [[] for _ in batch_items]
+                            
+                        for paper_item, keywords_with_freq in zip(batch_items, batch_kws):
+                            paper_id = paper_item.get("id")
+                            if not paper_id:
+                                continue
+                                
+                            if not already_in_papers:
+                                papers_buf.append((paper_id, paper_date, lang, json.dumps(paper_item)))
+                                if len(papers_buf) >= CHUNK_PAPERS:
+                                    flush_papers()
+                                    
+                            if not already_processed:
+                                cats = paper_item.get("categories", [])
+                                category = "unknown"
+                                if isinstance(cats, list) and len(cats) > 0:
+                                    category = cats[0]
+                                elif isinstance(cats, str):
+                                    cats_split = re.split(r"[,\s]+", cats.strip())
+                                    if cats_split and cats_split[0]:
+                                        category = cats_split[0]
+                                        
+                                # Merge OpenAlex concepts if available
+                                concepts = paper_item.get("concepts", [])
+                                if isinstance(concepts, list):
+                                    for concept in concepts:
+                                        if concept and isinstance(concept, str):
+                                            keywords_with_freq.append((concept.lower(), 2))
+                                
+                                # Group same keywords in the same paper to avoid duplicate key violations
+                                unique_kws = {}
+                                for kw, freq in keywords_with_freq:
+                                    unique_kws[kw] = unique_kws.get(kw, 0) + freq
+                                    
+                                for kw, freq in unique_kws.items():
+                                    paper_keywords_buf.append((paper_id, paper_date, lang, category, kw))
+                                    key = (paper_date, lang, category, kw)
+                                    stats_map[key] = stats_map.get(key, 0) + freq
+                                    
+                                if len(paper_keywords_buf) >= CHUNK_KEYWORDS:
+                                    flush_keywords()
+                                    flush_stats()
+
+                    with open(filepath, "r", encoding="utf-8") as f_in:
+                        for line in f_in:
+                            line_str = line.strip()
+                            if not line_str:
+                                continue
+                            try:
+                                paper = json.loads(line_str)
+                            except Exception:
+                                continue
+                                
+                            current_batch.append(paper)
+                            if len(current_batch) >= BATCH_NLP_SIZE:
+                                process_current_batch(current_batch)
+                                current_batch.clear()
+
+                    if current_batch:
+                        process_current_batch(current_batch)
+                        current_batch.clear()
+
+                    flush_papers()
+                    flush_keywords()
+                    flush_stats()
+                        
+                    if not already_processed:
+                        cursor.execute("INSERT OR REPLACE INTO processed_files (filename) VALUES (?)", (filename,))
+                    
+                    processed_files_cache.add(filename)
+                    
+                    # Incrementally update aggregation tables for the processed date, lang
+                    cursor.execute("""
+                    INSERT OR REPLACE INTO agg_daily_papers (paper_date, language, category, total_papers)
+                    SELECT paper_date, language, category, COUNT(DISTINCT paper_id)
+                    FROM paper_keywords
+                    WHERE paper_date = ? AND language = ?
+                    GROUP BY paper_date, language, category
+                    """, (paper_date, lang))
+                    
+                    cursor.execute("""
+                    INSERT OR REPLACE INTO agg_daily_keywords (paper_date, language, category, keyword, distinct_paper_count)
+                    SELECT paper_date, language, category, keyword, COUNT(DISTINCT paper_id)
+                    FROM paper_keywords
+                    WHERE paper_date = ? AND language = ?
+                    GROUP BY paper_date, language, category, keyword
+                    """, (paper_date, lang))
+                
+                conn.commit()
+            finally:
+                conn.close()
 
 reextract_lock = threading.Lock()
 reextract_status = {
@@ -414,16 +442,14 @@ def reextract_all_keywords():
                     """, rows)
                     stats_map.clear()
 
-            with open(filepath, "r", encoding="utf-8") as f_in:
-                for line in f_in:
-                    line_str = line.strip()
-                    if not line_str:
-                        continue
-                    try:
-                        paper = json.loads(line_str)
-                    except Exception:
-                        continue
-
+            BATCH_NLP_SIZE = 50
+            current_batch = []
+            
+            def process_reextract_batch(batch_items):
+                if not batch_items:
+                    return
+                batch_kws = keywords.extract_keywords_batch(batch_items, batch_size=BATCH_NLP_SIZE)
+                for paper, keywords_with_freq in zip(batch_items, batch_kws):
                     paper_id = paper.get("id")
                     if not paper_id:
                         continue
@@ -439,12 +465,6 @@ def reextract_all_keywords():
                         if cats_split and cats_split[0]:
                             category = cats_split[0]
 
-                    title = paper.get("title", "")
-                    summary = paper.get("summary", "")
-
-                    # 使用最新优化模型提取
-                    keywords_with_freq = keywords.extract_keywords(title, summary)
-
                     concepts = paper.get("concepts", [])
                     if isinstance(concepts, list):
                         for concept in concepts:
@@ -459,6 +479,25 @@ def reextract_all_keywords():
                         paper_keywords_buf.append((paper_id, paper_date, lang, category, kw))
                         key = (paper_date, lang, category, kw)
                         stats_map[key] = stats_map.get(key, 0) + freq
+
+            with open(filepath, "r", encoding="utf-8") as f_in:
+                for line in f_in:
+                    line_str = line.strip()
+                    if not line_str:
+                        continue
+                    try:
+                        paper = json.loads(line_str)
+                    except Exception:
+                        continue
+
+                    current_batch.append(paper)
+                    if len(current_batch) >= BATCH_NLP_SIZE:
+                        process_reextract_batch(current_batch)
+                        current_batch.clear()
+
+            if current_batch:
+                process_reextract_batch(current_batch)
+                current_batch.clear()
 
             with db_lock:
                 conn = connect_db(DB_PATH)
