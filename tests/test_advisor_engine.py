@@ -92,6 +92,44 @@ def test_init_llm_enables_deepseek_thinking(monkeypatch):
     kwargs = chat_openai.call_args.kwargs
     assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
 
+
+def test_init_llm_custom_base_url(monkeypatch):
+    monkeypatch.setenv("ADVISOR_MODEL_NAME", "deepseek-v4-flash")
+    monkeypatch.setenv("ADVISOR_OPENAI_API_KEY", "advisor-key")
+    monkeypatch.setenv("ADVISOR_OPENAI_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("MODEL_NAME", "MiniMax-M3")
+    monkeypatch.setenv("OPENAI_API_KEY", "general-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.minimaxi.com/v1")
+    with patch("ai.advisor.ChatOpenAI") as chat_openai:
+        from ai.advisor import init_llm
+
+        init_llm()
+
+    kwargs = chat_openai.call_args.kwargs
+    assert kwargs["model"] == "deepseek-v4-flash"
+    assert kwargs["openai_api_key"] == "advisor-key"
+    assert kwargs["base_url"] == "https://api.deepseek.com"
+    assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+def test_init_llm_fallback_to_general_env(monkeypatch):
+    monkeypatch.delenv("ADVISOR_MODEL_NAME", raising=False)
+    monkeypatch.delenv("ADVISOR_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ADVISOR_OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("MODEL_NAME", "MiniMax-M3")
+    monkeypatch.setenv("OPENAI_API_KEY", "general-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.minimaxi.com/v1")
+    with patch("ai.advisor.ChatOpenAI") as chat_openai:
+        from ai.advisor import init_llm
+
+        init_llm()
+
+    kwargs = chat_openai.call_args.kwargs
+    assert kwargs["model"] == "MiniMax-M3"
+    assert kwargs["openai_api_key"] == "general-key"
+    assert kwargs["base_url"] == "https://api.minimaxi.com/v1"
+
+
 def test_fetch_temporal_context_fallback():
     week_context, month_context = fetch_temporal_context("2026-08-08", db_path=TEST_DB)
     assert "暂无过去7天" in week_context
