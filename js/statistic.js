@@ -2157,7 +2157,6 @@ function drawQuadrantChart(keywords) {
     
     d3.select(this).select('circle')
       .transition().duration(150)
-      .attr('r', d.radius * 1.35)
       .style('opacity', 1);
 
     tooltip.transition().duration(100).style('opacity', 0.95);
@@ -2179,7 +2178,6 @@ function drawQuadrantChart(keywords) {
   .on('mouseout', function(event, d) {
     d3.select(this).select('circle')
       .transition().duration(150)
-      .attr('r', d.radius)
       .style('opacity', 0.9);
     tooltip.transition().duration(100).style('opacity', 0);
   })
