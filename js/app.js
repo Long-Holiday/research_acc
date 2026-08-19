@@ -266,7 +266,10 @@ function getUrlKeywords() {
 
 // 检查是否以JSON模式运行
 function isJsonMode() {
-  return getUrlCategory() !== null || getJsonParam() !== null || getUrlAuthor() !== null || getUrlKeywords() !== null;
+  // `category` is part of the interactive page state.  Treating it as a JSON
+  // mode switch prevents category changes from updating the URL and disables
+  // pagination.  JSON output is only enabled by the dedicated query options.
+  return getJsonParam() !== null || getUrlAuthor() !== null || getUrlKeywords() !== null;
 }
 
 // 输出JSON格式的论文数据
@@ -401,6 +404,7 @@ document.addEventListener('DOMContentLoaded', () => {
   urlJsonParam = getJsonParam();
   urlAuthorParam = getUrlAuthor();
   urlKeywordsParam = getUrlKeywords();
+  currentCategory = urlCategoryParam || 'all';
 
   // 初始化触底加载监听
   setupInfiniteScroll();
@@ -892,7 +896,7 @@ async function loadPapersByDate(date) {
   
   try {
     const selectedLanguage = selectLanguageForDate(date);
-    const hasJsonParams = urlCategoryParam !== null || urlJsonParam !== null || urlAuthorParam !== null || urlKeywordsParam !== null;
+    const hasJsonParams = isJsonMode();
 
     let dataUrl;
     if (hasJsonParams) {
@@ -1044,18 +1048,18 @@ function renderCategoryFilter(categories) {
 
 function filterByCategory(category) {
   currentCategory = category;
+  // Keep the cached URL value in sync as well.  Loading a new date after a
+  // category change must not restore the category that was present at startup.
+  urlCategoryParam = category === 'all' ? null : category;
 
-  // 如果不是JSON模式，才更新URL参数
-  if (!isJsonMode()) {
-    const url = new URL(window.location);
-    if (category === 'all') {
-      url.searchParams.delete('category');
-    } else {
-      url.searchParams.set('category', category);
-    }
-    // 使用replaceState更新URL，不刷新页面
-    window.history.replaceState({}, '', url);
+  const url = new URL(window.location);
+  if (category === 'all') {
+    url.searchParams.delete('category');
+  } else {
+    url.searchParams.set('category', category);
   }
+  // 使用replaceState更新URL，不刷新页面
+  window.history.replaceState({}, '', url);
 
   document.querySelectorAll('.category-button').forEach(button => {
     button.classList.toggle('active', button.dataset.category === category);
@@ -1631,7 +1635,7 @@ async function loadPapersByDateRange(startDate, endDate) {
   
   try {
     const selectedLanguage = selectLanguageForDate(startDate);
-    const hasJsonParams = urlCategoryParam !== null || urlJsonParam !== null || urlAuthorParam !== null || urlKeywordsParam !== null;
+    const hasJsonParams = isJsonMode();
 
     let dataUrl;
     if (hasJsonParams) {
@@ -1882,4 +1886,3 @@ function togglePdfSize(button) {
     });
   }
 }
-
