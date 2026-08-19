@@ -404,12 +404,21 @@ def enhance_papers_with_ai(
     return enhanced_results
 
 
-def sync_database_stats():
-    """补录完成后自动提取关键词并同步更新 statistics.db 本地数据库"""
+def sync_database_stats(paper_groups=None):
+    """补录完成后增量提取本轮论文关键词；未指定论文时执行手动全量同步。"""
     try:
-        from server_modules.processor import reextract_all_keywords, scan_and_process_files
-        print("正在为所有补录论文提取关键词并同步 statistics.db 数据库图谱与统计数据...")
-        success = reextract_all_keywords()
+        from server_modules.processor import (
+            reextract_all_keywords,
+            reextract_keywords_for_papers,
+            scan_and_process_files,
+        )
+        if paper_groups:
+            paper_count = sum(len(papers) for _, _, papers in paper_groups)
+            print(f"正在为本次补录的 {paper_count} 篇论文提取关键词并增量同步 statistics.db...")
+            success = reextract_keywords_for_papers(paper_groups)
+        else:
+            print("正在全量重新提取关键词并同步 statistics.db...")
+            success = reextract_all_keywords()
         if success:
             print("✅ 关键词提取与本地统计数据库同步已全部完成！")
         else:
@@ -461,6 +470,7 @@ def main():
 
     total_backfilled_raw = 0
     total_backfilled_ai = 0
+    keyword_sync_groups = []
 
     for date_str in dates_to_process:
         print(f"\n" + "-" * 70)
@@ -545,6 +555,7 @@ def main():
         if enhanced_items:
             existing_enhanced_ids = load_existing_ids(enhanced_file)
             appended_ai_count = 0
+            appended_ai_items = []
             with open(enhanced_file, "a", encoding="utf-8") as f:
                 for ep in enhanced_items:
                     epid = str(ep.get("id", "")).lower().strip()
@@ -552,12 +563,17 @@ def main():
                         f.write(json.dumps(ep, ensure_ascii=False) + "\n")
                         existing_enhanced_ids.add(epid)
                         appended_ai_count += 1
+                        appended_ai_items.append(ep)
             print(f"🤖 已成功将 {appended_ai_count} 篇 AI 增强论文追加至 {enhanced_file}")
             total_backfilled_ai += appended_ai_count
+            if appended_ai_items:
+                keyword_sync_groups.append((date_str, language, appended_ai_items))
 
     # 4. 同步数据库
-    if total_backfilled_raw > 0 and not args.dry_run and not args.skip_db_sync:
-        sync_database_stats()
+    if keyword_sync_groups and not args.dry_run and not args.skip_db_sync:
+        sync_database_stats(keyword_sync_groups)
+    elif total_backfilled_raw > 0 and args.skip_ai and not args.skip_db_sync:
+        print("ℹ️ 已跳过 AI 增强，本轮没有新增增强论文需要提取关键词。")
 
     print("\n" + "=" * 70)
     print("🎉 补录任务完成！")

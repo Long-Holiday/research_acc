@@ -341,6 +341,151 @@ def scan_and_process_files():
             except Exception:
                 pass
 
+
+def reextract_keywords_for_papers(paper_groups):
+    """仅重新提取指定论文的关键词，并增量刷新其日期/语言聚合数据。
+
+    ``paper_groups`` 为 ``[(paper_date, language, papers), ...]``。旧论文会先根据
+    数据库中保存的旧版本计算并扣除原关键词贡献；新增论文则直接追加，因此无需
+    清空关键词表或扫描全部历史增强文件。
+    """
+    groups = [
+        (paper_date, language, [paper for paper in papers if paper.get("id")])
+        for paper_date, language, papers in paper_groups
+        if papers
+    ]
+    groups = [(date, lang, papers) for date, lang, papers in groups if papers]
+    if not groups:
+        return True
+
+    def extract_contributions(papers):
+        if not papers:
+            return []
+        extracted = keywords.extract_keywords_batch(papers, batch_size=50)
+        contributions = []
+        for paper, paper_keywords in zip(papers, extracted):
+            cats = paper.get("categories", [])
+            if isinstance(cats, list) and cats:
+                category = cats[0]
+            elif isinstance(cats, str) and cats.strip():
+                category = re.split(r"[,\s]+", cats.strip())[0]
+            else:
+                category = "unknown"
+
+            for concept in paper.get("concepts", []):
+                if isinstance(concept, str) and concept:
+                    paper_keywords.append((concept.lower(), 2))
+
+            unique = {}
+            for keyword, frequency in paper_keywords:
+                unique[keyword] = unique.get(keyword, 0) + frequency
+            contributions.append((paper, category, unique))
+        return contributions
+
+    actual_db_path = get_db_path()
+    affected_date_languages = set()
+
+    with _scan_lock:
+        with db_lock:
+            conn = connect_db(actual_db_path)
+            try:
+                cursor = conn.cursor()
+                _init_tables(cursor)
+
+                for paper_date, language, papers in groups:
+                    paper_ids = [str(paper["id"]) for paper in papers]
+                    placeholders = ",".join("?" for _ in paper_ids)
+                    cursor.execute(
+                        f"SELECT paper_json FROM papers WHERE paper_date = ? AND language = ? "
+                        f"AND paper_id IN ({placeholders})",
+                        (paper_date, language, *paper_ids),
+                    )
+                    old_papers = []
+                    for (paper_json,) in cursor.fetchall():
+                        try:
+                            old_papers.append(json.loads(paper_json))
+                        except (TypeError, json.JSONDecodeError):
+                            pass
+
+                    old_contributions = extract_contributions(old_papers)
+                    new_contributions = extract_contributions(papers)
+
+                    # 先扣除这些论文旧版本对加权统计的贡献。
+                    for _, category, contribution in old_contributions:
+                        for keyword, frequency in contribution.items():
+                            cursor.execute(
+                                "UPDATE keyword_stats SET frequency = frequency - ? "
+                                "WHERE paper_date = ? AND language = ? AND category = ? AND keyword = ?",
+                                (frequency, paper_date, language, category, keyword),
+                            )
+
+                    cursor.execute(
+                        f"DELETE FROM paper_keywords WHERE paper_date = ? AND language = ? "
+                        f"AND paper_id IN ({placeholders})",
+                        (paper_date, language, *paper_ids),
+                    )
+
+                    for paper, category, contribution in new_contributions:
+                        paper_id = str(paper["id"])
+                        cursor.execute(
+                            "INSERT OR REPLACE INTO papers "
+                            "(paper_id, paper_date, language, paper_json) VALUES (?, ?, ?, ?)",
+                            (paper_id, paper_date, language, json.dumps(paper)),
+                        )
+                        cursor.executemany(
+                            "INSERT INTO paper_keywords "
+                            "(paper_id, paper_date, language, category, keyword) VALUES (?, ?, ?, ?, ?)",
+                            [(paper_id, paper_date, language, category, keyword) for keyword in contribution],
+                        )
+                        for keyword, frequency in contribution.items():
+                            cursor.execute("""
+                                INSERT INTO keyword_stats
+                                    (paper_date, language, category, keyword, frequency)
+                                VALUES (?, ?, ?, ?, ?)
+                                ON CONFLICT(paper_date, language, category, keyword)
+                                DO UPDATE SET frequency = frequency + excluded.frequency
+                            """, (paper_date, language, category, keyword, frequency))
+
+                    cursor.execute("DELETE FROM keyword_stats WHERE frequency <= 0")
+                    affected_date_languages.add((paper_date, language))
+
+                for paper_date, language in affected_date_languages:
+                    cursor.execute(
+                        "DELETE FROM agg_daily_papers WHERE paper_date = ? AND language = ?",
+                        (paper_date, language),
+                    )
+                    cursor.execute("""
+                        INSERT INTO agg_daily_papers (paper_date, language, category, total_papers)
+                        SELECT paper_date, language, category, COUNT(DISTINCT paper_id)
+                        FROM paper_keywords WHERE paper_date = ? AND language = ?
+                        GROUP BY paper_date, language, category
+                    """, (paper_date, language))
+                    cursor.execute(
+                        "DELETE FROM agg_daily_keywords WHERE paper_date = ? AND language = ?",
+                        (paper_date, language),
+                    )
+                    cursor.execute("""
+                        INSERT INTO agg_daily_keywords
+                            (paper_date, language, category, keyword, distinct_paper_count)
+                        SELECT paper_date, language, category, keyword, COUNT(DISTINCT paper_id)
+                        FROM paper_keywords WHERE paper_date = ? AND language = ?
+                        GROUP BY paper_date, language, category, keyword
+                    """, (paper_date, language))
+
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    try:
+        from server_modules.stats import clear_stats_cache
+        clear_stats_cache()
+    except Exception:
+        pass
+    return True
+
 reextract_lock = threading.Lock()
 reextract_status = {
     "status": "idle",

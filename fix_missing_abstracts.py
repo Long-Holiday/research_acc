@@ -332,12 +332,13 @@ def update_enhanced_file(enhanced_filepath: str, newly_enhanced_papers: List[Dic
     print(f"💾 已更新 AI 增强文件 {enhanced_filepath}: 替换旧条目 {replaced_count} 篇，追加新条目 {appended_count} 篇。")
 
 
-def sync_database():
-    """同步更新本地 statistics.db 数据库图谱与关键词"""
+def sync_database(paper_groups: List[Tuple[str, str, List[Dict]]]):
+    """仅为本轮成功修复并重新增强的论文增量更新关键词与统计。"""
     try:
-        from server_modules.processor import reextract_all_keywords, scan_and_process_files
-        print("📊 正在为修正后的论文重新提取关键词并同步 statistics.db 数据库统计与图谱...")
-        success = reextract_all_keywords()
+        from server_modules.processor import reextract_keywords_for_papers, scan_and_process_files
+        paper_count = sum(len(papers) for _, _, papers in paper_groups)
+        print(f"📊 正在为本次修复的 {paper_count} 篇论文重新提取关键词并增量同步 statistics.db...")
+        success = reextract_keywords_for_papers(paper_groups)
         if success:
             print("✅ statistics.db 统计数据库与关键词网络已成功同步！")
         else:
@@ -407,6 +408,7 @@ def main():
     total_rescued_papers = 0
     total_ai_processed = 0
     source_distribution = {}
+    keyword_sync_groups = []
 
     for raw_filepath in target_files:
         if not os.path.exists(raw_filepath):
@@ -487,11 +489,13 @@ def main():
 
             # 3. 就地更新或追加到 AI 增强 JSONL 文件中
             update_enhanced_file(enhanced_filepath, enhanced_papers)
+            if enhanced_papers:
+                keyword_sync_groups.append((date_str, language, enhanced_papers))
 
     # 4. 统计数据库同步
-    if total_rescued_papers > 0 and not args.dry_run and not args.skip_db_sync:
+    if keyword_sync_groups and not args.dry_run and not args.skip_db_sync:
         print("\n" + "-" * 75)
-        sync_database()
+        sync_database(keyword_sync_groups)
 
     print("\n" + "=" * 75)
     print("🎉 全流程处理完成！")
