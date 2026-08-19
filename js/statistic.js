@@ -1069,6 +1069,19 @@ window.aiFilterKeywords = aiFilterKeywords;
 window.clearExcludeKeywords = clearExcludeKeywords;
 window.reextractKeywords = reextractKeywords;
 
+// trend_score is the confidence-adjusted direction used for ranking and
+// quadrant classification.  Keep the fallback for responses cached by an
+// older server version.
+function getKeywordTrendScore(keyword) {
+  const value = keyword && keyword.trend_score;
+  return Number.isFinite(value) ? value : (Number(keyword && keyword.growth_rate) || 0);
+}
+
+function hasReliableKeywordTrend(keyword) {
+  if (!keyword || keyword.trend_confidence === undefined) return true;
+  return Number(keyword.trend_confidence) >= 0.2 && Math.abs(getKeywordTrendScore(keyword)) >= 0.05;
+}
+
 
 window.updateTrendChart = function() {
   const trendChartCard = document.getElementById('trendChartCard');
@@ -1099,24 +1112,24 @@ window.updateTrendChart = function() {
       .slice(0, 12)
       .map(k => k.keyword);
   } else if (currentTrendGroup === 'emerging') {
-    // 🚀 新兴趋势：按增长率从高到低排序（优先正增长）取前 12
-    const positiveGrowth = allFilteredKeywords.filter(k => (k.growth_rate || 0) > 0.02);
+    // 🚀 新兴趋势：按可信趋势强度从高到低取前 12
+    const positiveGrowth = allFilteredKeywords.filter(k => hasReliableKeywordTrend(k) && getKeywordTrendScore(k) > 0);
     targetKeywords = [...(positiveGrowth.length > 0 ? positiveGrowth : allFilteredKeywords)]
-      .sort((a, b) => (b.growth_rate || 0) - (a.growth_rate || 0))
+      .sort((a, b) => getKeywordTrendScore(b) - getKeywordTrendScore(a))
       .slice(0, 12)
       .map(k => k.keyword);
   } else if (currentTrendGroup === 'cooling') {
-    // 📉 关注减退：按增长率最低（负增长）且具备一定基础频次的词取前 12
-    const coolingKw = allFilteredKeywords.filter(k => (k.growth_rate || 0) < 0 && (k.count || 0) >= 2);
+    // 📉 关注减退：按可信趋势强度从低到高取前 12
+    const coolingKw = allFilteredKeywords.filter(k => hasReliableKeywordTrend(k) && getKeywordTrendScore(k) < 0);
     targetKeywords = [...(coolingKw.length > 0 ? coolingKw : allFilteredKeywords)]
-      .sort((a, b) => (a.growth_rate || 0) - (b.growth_rate || 0))
+      .sort((a, b) => getKeywordTrendScore(a) - getKeywordTrendScore(b))
       .slice(0, 12)
       .map(k => k.keyword);
   } else {
     // 全部 Top：结合主流 top 6 + 新兴 top 5 + 衰退 top 4 (去除重复)，共 15 条展示丰富数据
     const topMain = [...allFilteredKeywords].sort((a, b) => b.count - a.count).slice(0, 6);
-    const topEmerg = [...allFilteredKeywords].filter(k => (k.growth_rate || 0) > 0.05).sort((a, b) => b.growth_rate - a.growth_rate).slice(0, 5);
-    const topCool = [...allFilteredKeywords].filter(k => (k.growth_rate || 0) < 0 && k.count >= 2).sort((a, b) => a.growth_rate - b.growth_rate).slice(0, 4);
+    const topEmerg = [...allFilteredKeywords].filter(k => hasReliableKeywordTrend(k) && getKeywordTrendScore(k) > 0).sort((a, b) => getKeywordTrendScore(b) - getKeywordTrendScore(a)).slice(0, 5);
+    const topCool = [...allFilteredKeywords].filter(k => hasReliableKeywordTrend(k) && getKeywordTrendScore(k) < 0).sort((a, b) => getKeywordTrendScore(a) - getKeywordTrendScore(b)).slice(0, 4);
     
     const combinedSet = new Set([
       ...topMain.map(k => k.keyword),
@@ -1158,6 +1171,8 @@ window.updateTrendChart = function() {
     return {
       keyword: keyword,
       growth_rate: kwMeta.growth_rate || 0,
+      trend_score: getKeywordTrendScore(kwMeta),
+      trend_confidence: kwMeta.trend_confidence,
       count: kwMeta.count || 0,
       rate: kwMeta.rate || 0,
       values: values
@@ -1207,18 +1222,15 @@ window.updateCharts = function() {
   }));
 
   if (hotKeywordsList) {
-    // 找出当前显示的关键词中，增长率排名前 5 的关键词（包括负增长）
+    // 找出当前显示的关键词中可信上升强度排名前 5 的关键词
     const sortedByGrowth = [...displayedKeywords]
-      .sort((a, b) => {
-        const rateA = (a.growth_rate !== undefined && a.growth_rate !== null) ? a.growth_rate : -Infinity;
-        const rateB = (b.growth_rate !== undefined && b.growth_rate !== null) ? b.growth_rate : -Infinity;
-        return rateB - rateA;
-      });
+      .filter(item => hasReliableKeywordTrend(item) && getKeywordTrendScore(item) > 0)
+      .sort((a, b) => getKeywordTrendScore(b) - getKeywordTrendScore(a));
     const top5Keywords = new Set(sortedByGrowth.slice(0, 5).map(item => item.keyword));
 
     hotKeywordsList.innerHTML = displayedKeywords.map((item, index) => {
       const isTop5 = top5Keywords.has(item.keyword);
-      const isGreaterThanPointTwo = item.growth_rate && item.growth_rate > 0.2;
+      const isGreaterThanPointTwo = hasReliableKeywordTrend(item) && getKeywordTrendScore(item) > 0.2;
       const showFire = isTop5 || isGreaterThanPointTwo;
       
       const rateVal = Math.round((item.growth_rate || 0) * 100);
@@ -1888,8 +1900,8 @@ function drawQuadrantChart(keywords) {
 
   // 双池采样策略：高频池(Top 15) + 高增长潜力池(Top 15) + 降温池(Top 8)，确保新兴趋势象限拥有真实候选
   const topByCount = [...validKeywords].sort((a, b) => b.count - a.count).slice(0, 15);
-  const topByGrowth = [...validKeywords].filter(k => (k.growth_rate || 0) > 0.03).sort((a, b) => (b.growth_rate || 0) - (a.growth_rate || 0)).slice(0, 15);
-  const topCooling = [...validKeywords].filter(k => (k.growth_rate || 0) < -0.03 && (k.count || 0) >= 2).sort((a, b) => (a.growth_rate || 0) - (b.growth_rate || 0)).slice(0, 8);
+  const topByGrowth = [...validKeywords].filter(k => hasReliableKeywordTrend(k) && getKeywordTrendScore(k) > 0).sort((a, b) => getKeywordTrendScore(b) - getKeywordTrendScore(a)).slice(0, 15);
+  const topCooling = [...validKeywords].filter(k => hasReliableKeywordTrend(k) && getKeywordTrendScore(k) < 0).sort((a, b) => getKeywordTrendScore(a) - getKeywordTrendScore(b)).slice(0, 8);
 
   const mergedMap = new Map();
   [...topByCount, ...topByGrowth, ...topCooling].forEach(item => {
@@ -1906,13 +1918,17 @@ function drawQuadrantChart(keywords) {
   }
 
   const scatterData = Array.from(mergedMap.values()).slice(0, 30).map(item => {
-    const rateVal = Math.round((item.growth_rate || 0) * 100);
+    const trendScore = getKeywordTrendScore(item);
     return {
       keyword: item.keyword,
       count: item.count || 0,
       rate: item.rate || 0,
       growth_rate: item.growth_rate || 0,
-      growth_percent: rateVal,
+      trend_score: trendScore,
+      trend_confidence: item.trend_confidence,
+      early_rate: item.early_rate,
+      recent_rate: item.recent_rate,
+      growth_percent: Math.round(trendScore * 100),
       valueX: currentTrendYType === 'count' ? (item.count || 0) : (item.rate || 0)
     };
   });
@@ -1948,11 +1964,11 @@ function drawQuadrantChart(keywords) {
   const xScale = d3.scaleLinear().domain([xMin, xMax]).nice().range([0, width]);
   const yScale = d3.scaleLinear().domain([yMin, yMax]).nice().range([height, 0]);
 
-  // 使用中位数（Median）作为 X 轴中轴分割线
-  const medianX = d3.median(scatterData, d => d.valueX);
+  // 使用完整候选集的中位数，避免双池采样比例改变时象限边界漂移。
+  const medianX = d3.median(validKeywords, d => currentTrendYType === 'count' ? (d.count || 0) : (d.rate || 0));
   const midX = (medianX !== undefined && medianX > xMin && medianX < xMax) ? medianX : ((xMin + xMax) / 2);
   const midXPixel = Math.max(0, Math.min(width, xScale(midX)));
-  const midYPixel = Math.max(0, Math.min(height, yScale(0))); // 0% 增长率基准线
+  const midYPixel = Math.max(0, Math.min(height, yScale(0))); // 可信趋势的中性基准线
 
   // 1. 绘制四个象限背景块
   const quadrants = [
@@ -2073,7 +2089,7 @@ function drawQuadrantChart(keywords) {
     .style('font-size', '11px')
     .style('font-weight', '500')
     .style('fill', '#64748b')
-    .text('近期增长率 (Growth %) →');
+    .text('可信趋势强度 (Trend score) →');
 
   // 4. 散点节点数据初始化
   scatterData.forEach(d => {
@@ -2121,9 +2137,9 @@ function drawQuadrantChart(keywords) {
   nodes.append('circle')
     .attr('r', d => d.radius)
     .style('fill', d => {
-      if (d.growth_percent > 0 && d.valueX >= midX) return '#10b981'; // 核心主流：绿
+      if (d.growth_percent >= 0 && d.valueX >= midX) return '#10b981'; // 核心主流：绿（含稳定高热度）
       if (d.growth_percent > 0 && d.valueX < midX) return '#2563eb';  // 新兴趋势：蓝
-      if (d.growth_percent <= 0 && d.valueX >= midX) return '#ef4444'; // 关注减退：红
+      if (d.growth_percent < 0 && d.valueX >= midX) return '#ef4444'; // 关注减退：红
       return '#64748b'; // 边缘/低频：灰
     })
     .style('opacity', 0.9)
@@ -2161,12 +2177,17 @@ function drawQuadrantChart(keywords) {
 
     tooltip.transition().duration(100).style('opacity', 0.95);
 
-    const quadTag = d.growth_percent > 0 ? (d.valueX >= midX ? '🌟 核心主流' : '🚀 新兴趋势') : (d.valueX >= midX ? '📉 关注减退' : '💤 边缘/低频');
+    const quadTag = d.valueX >= midX
+      ? (d.growth_percent >= 0 ? '🌟 核心主流' : '📉 关注减退')
+      : (d.growth_percent > 0 ? '🚀 新兴趋势' : '💤 边缘/低频');
+    const actualGrowth = Math.round((d.growth_rate || 0) * 100);
+    const confidence = d.trend_confidence === undefined ? null : Math.round(d.trend_confidence * 100);
     const content = `
       <div style="font-weight:bold;margin-bottom:4px;font-size:13px;">${d.keyword}</div>
       <div style="font-size:12px;margin-bottom:2px;">象限定位: <span style="color:#38bdf8;font-weight:600;">${quadTag}</span></div>
-      <div style="font-size:12px;margin-bottom:2px;">频次: <b>${Math.round(d.count)}</b> | 频率: <b>${(d.rate * 100).toFixed(2)}%</b></div>
-      <div style="font-size:12px;">增长率: <span style="color:${d.growth_percent >= 0 ? '#4ade80' : '#f87171'};font-weight:bold;">${d.growth_percent >= 0 ? '+' : ''}${d.growth_percent}%</span></div>
+      <div style="font-size:12px;margin-bottom:2px;">频次: <b>${Math.round(d.count)}</b> | 频率: <b>${d.rate.toFixed(2)}%</b></div>
+      <div style="font-size:12px;">窗口变化: <span style="color:${actualGrowth >= 0 ? '#4ade80' : '#f87171'};font-weight:bold;">${actualGrowth >= 0 ? '+' : ''}${actualGrowth}%</span></div>
+      <div style="font-size:12px;">趋势强度: <b>${d.growth_percent}</b>${confidence === null ? '' : ` | 置信度: <b>${confidence}%</b>`}</div>
       <div style="font-size:11px;color:#94a3b8;margin-top:4px;border-top:1px solid rgba(255,255,255,0.15);padding-top:3px;">点击查看相关论文</div>
     `;
     tooltip.html(content);

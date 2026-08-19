@@ -154,6 +154,84 @@ IS_TESTING = "pytest" in sys.modules or "unittest" in sys.modules
 # 服务端统计结果内存缓存 (TTL 300秒)
 stats_cache = {}
 
+
+def _calculate_keyword_trend(date_distribution, total_papers_map):
+    """Estimate a keyword trend without overreacting to sparse publication days.
+
+    The old implementation used Mann-Kendall over every calendar day.  Days with
+    no papers were consequently treated as a real 0% observation and a keyword
+    with only a handful of hits could receive the maximum trend score.  Here we
+    compare chronological, paper-volume-normalised windows, apply an empirical
+    Bayes prior, and shrink the result by its statistical confidence.
+    """
+    observations = []
+    for date in sorted(total_papers_map):
+        total = int(total_papers_map.get(date) or 0)
+        if total <= 0:
+            continue
+        count = min(int(date_distribution.get(date, 0) or 0), total)
+        observations.append((date, count, total))
+
+    total_count = sum(item[1] for item in observations)
+    total_papers = sum(item[2] for item in observations)
+    neutral = {
+        "growth_rate": 0.0,
+        "trend_score": 0.0,
+        "trend_confidence": 0.0,
+        "early_rate": 0.0,
+        "recent_rate": 0.0,
+    }
+    if len(observations) < 3 or total_count < 3 or total_papers <= 0:
+        return neutral
+
+    # Compare equally sized chronological windows.  With an odd number of
+    # observations the centre date is deliberately neutral and omitted.
+    window_size = len(observations) // 2
+    early = observations[:window_size]
+    recent = observations[-window_size:]
+    early_count, early_total = sum(x[1] for x in early), sum(x[2] for x in early)
+    recent_count, recent_total = sum(x[1] for x in recent), sum(x[2] for x in recent)
+    if early_total <= 0 or recent_total <= 0:
+        return neutral
+
+    overall_rate = total_count / total_papers
+    # A small data-driven prior prevents 0 -> 1 occurrences from becoming an
+    # infinite/maximum increase while remaining negligible for large windows.
+    prior_strength = min(20.0, max(4.0, math.sqrt(total_papers) * 0.5))
+    prior_hits = overall_rate * prior_strength
+    early_rate = (early_count + prior_hits) / (early_total + prior_strength)
+    recent_rate = (recent_count + prior_hits) / (recent_total + prior_strength)
+
+    # Symmetric relative change is bounded to [-2, 2] and behaves sensibly when
+    # the early rate is near zero.  It is the value shown to users as growth.
+    denominator = max((early_rate + recent_rate) / 2.0, 1.0 / (total_papers + prior_strength))
+    growth_rate = max(-2.0, min(2.0, (recent_rate - early_rate) / denominator))
+
+    pooled = (early_count + recent_count + 2 * prior_hits) / (
+        early_total + recent_total + 2 * prior_strength
+    )
+    standard_error = math.sqrt(max(
+        pooled * (1.0 - pooled) * (1.0 / (early_total + prior_strength) +
+                                   1.0 / (recent_total + prior_strength)),
+        1e-12,
+    ))
+    z_score = abs(recent_rate - early_rate) / standard_error
+    sample_reliability = 1.0 - math.exp(-total_count / 8.0)
+    confidence = (1.0 - math.exp(-z_score / 2.0)) * sample_reliability
+    trend_score = max(-1.0, min(1.0, growth_rate * confidence))
+
+    # A dead band avoids classifying visually tiny/noisy changes as a trend.
+    if confidence < 0.2 or abs(trend_score) < 0.05:
+        trend_score = 0.0
+
+    return {
+        "growth_rate": round(growth_rate, 4),
+        "trend_score": round(trend_score, 4),
+        "trend_confidence": round(confidence, 4),
+        "early_rate": round(early_rate * 100, 4),
+        "recent_rate": round(recent_rate * 100, 4),
+    }
+
 def clear_stats_cache():
     stats_cache.clear()
 
@@ -312,44 +390,14 @@ def get_keyword_stats(
             entry["category_distribution"][cat] = entry["category_distribution"].get(cat, 0) + count
             entry["date_distribution"][p_date] = entry["date_distribution"].get(p_date, 0) + count
 
-        # 3. Calculate metrics and growth rate
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-        delta_days = (end_dt - start_dt).days
-        N = delta_days + 1
-        
-        def calc_mann_kendall(y):
-            n = len(y)
-            if n < 3:
-                return 0.0
-            s = 0
-            for i in range(n - 1):
-                for j in range(i + 1, n):
-                    if y[j] > y[i]:
-                        s += 1
-                    elif y[j] < y[i]:
-                        s -= 1
-            denom = n * (n - 1) / 2.0
-            return float(s / denom) if denom > 0 else 0.0
-
+        # 3. Calculate volume-normalised metrics and confidence-adjusted trends
         for kw, entry in keyword_data.items():
             if total_papers_in_period > 0:
                 entry["rate"] = round((entry["count"] / total_papers_in_period) * 100, 2)
             else:
                 entry["rate"] = 0.0
                 
-            # Mann-Kendall & Momentum Trend on penetration rate
-            if N >= 3 and entry["count"] >= 3:
-                rates = []
-                for i in range(N):
-                    dt_str = (start_dt + timedelta(days=i)).strftime("%Y-%m-%d")
-                    total_on_date = total_papers_map.get(dt_str, 0)
-                    kw_count_on_date = entry["date_distribution"].get(dt_str, 0)
-                    rate_val = (kw_count_on_date / total_on_date) if total_on_date > 0 else 0.0
-                    rates.append(rate_val)
-                entry["growth_rate"] = calc_mann_kendall(rates)
-            else:
-                entry["growth_rate"] = 0.0
+            entry.update(_calculate_keyword_trend(entry["date_distribution"], total_papers_map))
 
         # Convert to list and sort by count descending
         keywords_list = sorted(keyword_data.values(), key=lambda x: x["count"], reverse=True)[:100]

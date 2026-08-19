@@ -464,7 +464,7 @@ def test_hot_papers_apis():
         server.ACCESS_PASSWORD = old_password
 
 
-def test_keyword_growth_rate_ols():
+def test_keyword_growth_rate_is_confidence_adjusted():
     # Configure fake password
     import server
     import server_modules.processor as processor
@@ -536,7 +536,11 @@ def test_keyword_growth_rate_ols():
         # Now check "noisy".
         assert "noisy" in kw_map
         assert kw_map["noisy"]["count"] == 3
-        assert kw_map["noisy"]["growth_rate"] == 1.0
+        # A three-hit keyword may have a positive raw window change, but it is
+        # not strong enough to be presented as a reliable emerging trend.
+        assert kw_map["noisy"]["growth_rate"] > 0
+        assert kw_map["noisy"]["trend_confidence"] < 0.2
+        assert kw_map["noisy"]["trend_score"] == 0.0
         
     finally:
         for tf in [test_file_0, test_file_1, test_file_2]:
@@ -774,7 +778,6 @@ def test_reextract_keywords_api():
         server.ACCESS_PASSWORD = old_password
         server.DB_PATH = old_server_db_path
         processor.DB_PATH = old_processor_db_path
-
 
 
 
