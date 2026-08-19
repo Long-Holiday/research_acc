@@ -753,3 +753,210 @@ body .flatpickr-calendar:not(.inline):before,
 body .flatpickr-calendar:not(.inline):after {
     border-bottom-color: #1e293b !important;
 }
+
+/* =========================================
+   Advisor Page Responsive Styles
+   ========================================= */
+@media (max-width: 768px) {
+    .header-controls .action-btn {
+        padding: 4px 8px;
+        font-size: 0.76rem;
+        gap: 3px;
+        border-radius: 6px;
+    }
+
+    .topic-banner {
+        padding: 10px 14px;
+        margin-bottom: 16px;
+    }
+
+    .topic-content {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        font-size: 0.88rem;
+    }
+
+    .topic-label {
+        font-size: 0.82rem;
+    }
+
+    .edit-topic-btn {
+        align-self: flex-start;
+        padding: 4px 10px;
+        font-size: 0.8rem;
+    }
+
+    .advisor-main {
+        padding: 0 12px 30px 12px;
+        margin-bottom: 20px;
+    }
+
+    .advisor-card {
+        padding: 16px 14px;
+        border-radius: 12px;
+    }
+
+    .card-header {
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+        padding-bottom: 10px;
+    }
+
+    .card-header h2 {
+        font-size: 1.1rem;
+    }
+
+    .card-badge {
+        font-size: 0.72rem;
+        padding: 3px 8px;
+    }
+
+    .state-container {
+        padding: 40px 14px;
+    }
+
+    .empty-icon {
+        font-size: 2.2rem;
+    }
+
+    .idea-tabs-nav {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap;
+        gap: 6px;
+        padding-bottom: 6px;
+        scrollbar-width: none;
+    }
+
+    .idea-tab-btn {
+        padding: 6px 10px;
+        font-size: 0.84rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .idea-action-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px;
+    }
+
+    .idea-type-title {
+        font-size: 1rem;
+    }
+
+    .copy-exp-btn {
+        width: 100%;
+        text-align: center;
+        padding: 8px 12px;
+    }
+
+    .idea-details-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .idea-detail-box {
+        padding: 12px;
+    }
+
+    .detail-label {
+        font-size: 0.8rem;
+    }
+
+    .detail-value {
+        font-size: 0.88rem;
+    }
+
+    .markdown-body {
+        font-size: 0.9rem;
+    }
+
+    .markdown-body h1 { font-size: 1.25rem; }
+    .markdown-body h2 { font-size: 1.15rem; }
+    .markdown-body h3 { font-size: 1.05rem; }
+    .markdown-body h4 { font-size: 0.95rem; }
+
+    .markdown-body table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
+        width: 100%;
+    }
+
+    .markdown-body th, .markdown-body td {
+        padding: 8px 10px;
+        font-size: 0.82rem;
+        white-space: nowrap;
+    }
+
+    .markdown-body pre {
+        padding: 12px;
+        font-size: 0.8rem;
+    }
+
+    .katex-block-wrapper {
+        padding: 10px 12px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        font-size: 0.9em;
+    }
+
+    .mermaid-body {
+        padding: 12px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .mermaid-body svg {
+        min-width: 260px;
+    }
+
+    .diagram-toolbar {
+        padding: 8px 12px;
+    }
+
+    .diagram-badge {
+        font-size: 0.76rem;
+    }
+
+    .diagram-code-wrapper {
+        padding: 10px 12px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .diagram-code-wrapper code {
+        font-size: 0.72rem;
+    }
+
+    .modal-card {
+        width: 94%;
+        max-width: 480px;
+        padding: 18px 14px;
+        border-radius: 12px;
+    }
+
+    .modal-body textarea {
+        font-size: 16px; /* 防止 iOS 聚焦放大 */
+    }
+
+    .toast-container {
+        left: 12px;
+        right: 12px;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        display: flex;
+        justify-content: center;
+    }
+
+    .toast {
+        width: 100%;
+        text-align: center;
+        padding: 10px 16px;
+        font-size: 0.88rem;
+    }
+}

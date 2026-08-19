@@ -115,27 +115,9 @@ function createErrorHTML(message = 'An error occurred.') {
 // Categories names are displayed directly from data keys to match the main page
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Check screen size
-  const checkScreenSize = () => {
-    if (window.innerWidth < 768) {
-      const warningModal = document.createElement('div');
-      warningModal.className = 'screen-size-warning';
-      warningModal.innerHTML = `
-        <div class="warning-content">
-          <h3>⚠️ Screen Size Notice</h3>
-          <p>We've detected that you're using a device with a small screen. For the best data visualization experience, we recommend viewing this statistics page on a larger screen device (such as a tablet or computer).</p>
-          <button onclick="this.parentElement.parentElement.remove()">Got it</button>
-        </div>
-      `;
-      document.body.appendChild(warningModal);
-    }
-  };
-
-  checkScreenSize();
   // Recheck on window resize and redraw quadrant chart
   let resizeTimer = null;
   window.addEventListener('resize', () => {
-    checkScreenSize();
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       if (window.currentQuadrantKeywords) {
