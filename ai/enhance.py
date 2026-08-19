@@ -4,7 +4,7 @@ import sys
 import re
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict
+from typing import List, Dict, Optional
 from queue import Queue
 from threading import Lock
 # INSERT_YOUR_CODE
@@ -94,23 +94,50 @@ def invoke_chain_with_retry(chain, inputs: Dict) -> Structure:
         return chain.invoke(inputs)
     return _invoke()
 
+def is_abstract_missing(summary: Optional[str]) -> bool:
+    """判断论文摘要是否缺失或为无效占位符"""
+    if not summary or not isinstance(summary, str):
+        return True
+    s = summary.strip()
+    if len(s) < 25:
+        return True
+    lower = s.lower().rstrip(".").strip()
+    invalid_phrases = [
+        "no abstract available in openalex",
+        "no abstract available",
+        "abstract not available",
+        "no abstract",
+        "abstract unavailable",
+        "none",
+        "n/a",
+        "not available"
+    ]
+    if lower in invalid_phrases:
+        return True
+    if lower.startswith("no abstract available in openalex"):
+        return True
+    return False
+
+
 def process_single_item(chain, item: Dict, language: str) -> Dict:
     """处理单个数据项"""
+    summary_val = item.get('summary', '') or ''
+    missing_abstract = is_abstract_missing(summary_val)
 
     # Default structure with meaningful fallback values
     default_ai_fields = {
         "translated_title": "",
-        "tldr": "Summary generation failed",
-        "motivation": "Motivation analysis unavailable",
-        "method": "Method extraction failed",
-        "result": "Result analysis unavailable",
-        "conclusion": "Conclusion extraction failed",
-        "remote_sensing_cross": "Remote sensing cross-disciplinary scheme unavailable"
+        "tldr": "缺失摘要" if missing_abstract else "Summary generation failed",
+        "motivation": "缺失摘要" if missing_abstract else "Motivation analysis unavailable",
+        "method": "缺失摘要" if missing_abstract else "Method extraction failed",
+        "result": "缺失摘要" if missing_abstract else "Result analysis unavailable",
+        "conclusion": "缺失摘要" if missing_abstract else "Conclusion extraction failed",
+        "remote_sensing_cross": "缺失摘要" if missing_abstract else "Remote sensing cross-disciplinary scheme unavailable"
     }
 
     inputs = {
         "language": language,
-        "content": item.get('summary', ''),
+        "content": "" if missing_abstract else summary_val,
         "title": item.get('title', '')
     }
 

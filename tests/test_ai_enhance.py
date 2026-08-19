@@ -121,3 +121,53 @@ def test_repair_and_extract_json():
     assert "frac" in parsed["tldr"]
 
 
+def test_validate_remote_sensing_cross_missing_abstract():
+    assert Structure.validate_remote_sensing_cross("缺失摘要") == "缺失摘要"
+    assert Structure.validate_remote_sensing_cross("  缺失摘要  ") == "缺失摘要"
+
+
+def test_structure_with_missing_abstract_fields():
+    data = {
+        "translated_title": "遥感图像变化检测新方法",
+        "tldr": "缺失摘要",
+        "motivation": "缺失摘要",
+        "method": "缺失摘要",
+        "result": "缺失摘要",
+        "conclusion": "缺失摘要",
+        "remote_sensing_cross": "缺失摘要"
+    }
+    s = Structure(**data)
+    assert s.translated_title == "遥感图像变化检测新方法"
+    assert s.tldr == "缺失摘要"
+    assert s.remote_sensing_cross == "缺失摘要"
+
+
+def test_process_single_item_empty_abstract():
+    class MissingMockChain:
+        def invoke(self, inputs):
+            return Structure(
+                translated_title=f"翻译：{inputs.get('title')}",
+                tldr="缺失摘要",
+                motivation="缺失摘要",
+                method="缺失摘要",
+                result="缺失摘要",
+                conclusion="缺失摘要",
+                remote_sensing_cross="缺失摘要"
+            )
+
+    chain = MissingMockChain()
+    item = {
+        "title": "Remote Sensing Foundation Models",
+        "summary": "No abstract available in OpenAlex."
+    }
+    res = process_single_item(chain, item, "Chinese")
+    assert "AI" in res
+    assert res["AI"]["translated_title"] == "翻译：Remote Sensing Foundation Models"
+    assert res["AI"]["tldr"] == "缺失摘要"
+    assert res["AI"]["motivation"] == "缺失摘要"
+    assert res["AI"]["method"] == "缺失摘要"
+    assert res["AI"]["result"] == "缺失摘要"
+    assert res["AI"]["conclusion"] == "缺失摘要"
+    assert res["AI"]["remote_sensing_cross"] == "缺失摘要"
+
+

@@ -1,5 +1,5 @@
 Title: {title}
-Please analyze the following abstract of papers. 
+Please analyze the following abstract of papers. If the abstract content is empty, missing, or unavailable, ONLY translate the title, and fill all other fields with "缺失摘要".
 
 Content:
 {content}

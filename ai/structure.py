@@ -10,19 +10,21 @@ CROSS_DOMAIN_PROMPT = os.environ.get(
 
 class Structure(BaseModel):
     translated_title: str = Field(description="translate the paper's title into Chinese (or the specified target language)")
-    tldr: str = Field(description="generate a too long; didn't read summary")
-    motivation: str = Field(description="describe the motivation in this paper")
-    method: str = Field(description="method of this paper")
-    result: str = Field(description="result of this paper")
-    conclusion: str = Field(description="conclusion of this paper")
+    tldr: str = Field(description="generate a too long; didn't read summary. If abstract is empty/missing, fill '缺失摘要'")
+    motivation: str = Field(description="describe the motivation in this paper. If abstract is empty/missing, fill '缺失摘要'")
+    method: str = Field(description="method of this paper. If abstract is empty/missing, fill '缺失摘要'")
+    result: str = Field(description="result of this paper. If abstract is empty/missing, fill '缺失摘要'")
+    conclusion: str = Field(description="conclusion of this paper. If abstract is empty/missing, fill '缺失摘要'")
     remote_sensing_cross: str = Field(
-        description=CROSS_DOMAIN_PROMPT
+        description=f"{CROSS_DOMAIN_PROMPT} (如果摘要缺失，则直接填写'缺失摘要')"
     )
 
     @field_validator("remote_sensing_cross")
     @classmethod
     def validate_remote_sensing_cross(cls, v: str) -> str:
         v = v.strip()
+        if "缺失摘要" in v or v == "缺失摘要":
+            return "缺失摘要"
         # 尝试匹配文本开头的百分比数字
         # 比如 "交叉/改进可行性：95%。具体方案..." 或 "交叉可行性：85%。具体方案..." 或 "改进可行性：90%。具体方案..."
         match_start = re.match(r"^(?:交叉/改进可行性|交叉可行性|改进可行性)\s*[：:]\s*(\d+)\s*%\s*[。.]?[ \t]*(.*)", v, re.IGNORECASE | re.DOTALL)
