@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
     session_task.cancel()
     scan_task.cancel()
 
-app = FastAPI(title="Daily arXiv AI Enhanced Server", lifespan=lifespan)
+app = FastAPI(title="Make RS Great Again Server", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Include routers

@@ -9,17 +9,17 @@ def test_index_page():
     # Test root route
     response = client.get("/")
     assert response.status_code == 200
-    assert "Daily arXiv AI Enhanced" in response.text
+    assert "Make RS Great Again" in response.text
 
     # Test /index.html route
     response = client.get("/index.html")
     assert response.status_code == 200
-    assert "Daily arXiv AI Enhanced" in response.text
+    assert "Make RS Great Again" in response.text
 
 def test_login_page():
     response = client.get("/login.html")
     assert response.status_code == 200
-    assert "Access Verification" in response.text or "daily-arXiv-ai-enhanced" in response.text
+    assert "Access Verification" in response.text or "Make RS Great Again" in response.text
 
 def test_settings_page():
     response = client.get("/settings.html")

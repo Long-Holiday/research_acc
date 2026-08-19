@@ -1,4 +1,4 @@
-// Shared utilities for Daily arXiv AI Enhanced System
+// Shared utilities for Make RS Great Again System
 
 function escapeHtml(str) {
   if (!str) return '';
