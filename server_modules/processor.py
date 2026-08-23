@@ -187,6 +187,18 @@ def scan_and_process_files():
                     if already_processed and already_in_papers:
                         processed_files_cache.add(filename)
                         continue
+
+                    # --- 全局跨日期去重：加载同 language 下已存在的 paper_id 集合 ---
+                    # 防止不同日期的 AI 增强文件包含同一期刊论文时重复入库
+                    existing_global_ids = set()
+                    try:
+                        cursor.execute("SELECT paper_id FROM papers WHERE language = ?", (lang,))
+                        for (pid,) in cursor.fetchall():
+                            if pid:
+                                existing_global_ids.add(str(pid))
+                    except Exception:
+                        existing_global_ids = set()
+                    seen_in_file = set()
                         
                     filepath = os.path.join(db_dir, filename)
                     if not os.path.exists(filepath):
@@ -248,9 +260,18 @@ def scan_and_process_files():
                             paper_id = paper_item.get("id")
                             if not paper_id:
                                 continue
+                            paper_id_str = str(paper_id)
+                            # 同文件内去重
+                            if paper_id_str in seen_in_file:
+                                continue
+                            # 跨日期全局去重（同 language 下 paper_id 已存在则跳过）
+                            if paper_id_str in existing_global_ids:
+                                continue
+                            seen_in_file.add(paper_id_str)
+                            existing_global_ids.add(paper_id_str)
                                 
                             if not already_in_papers:
-                                papers_buf.append((paper_id, paper_date, lang, json.dumps(paper_item)))
+                                papers_buf.append((paper_id_str, paper_date, lang, json.dumps(paper_item)))
                                 if len(papers_buf) >= CHUNK_PAPERS:
                                     flush_papers()
                                     

@@ -240,6 +240,104 @@ def main():
                 
         print(f"  Abstract stats for {journal['name']}: {abstract_stats}", file=sys.stderr)
 
+    # --- 跨日期全局去重：防止 7 天滑动窗口导致的不同日期重复 ---
+    def _load_existing_ids_for_dedup(output_path: str) -> set:
+        """加载已存在的论文标识（id + doi）用于去重，覆盖输出文件自身及历史所有 data/*.jsonl"""
+        seen = set()
+        # 1) 输出文件自身（同文件内去重，支持断点续写场景）
+        if os.path.exists(output_path):
+            try:
+                with open(output_path, "r", encoding="utf-8") as rf:
+                    for line in rf:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            j = json.loads(line)
+                        except Exception:
+                            continue
+                        pid = str(j.get("id", "")).lower().strip()
+                        if pid:
+                            seen.add(pid)
+                        abs_url = j.get("abs") or ""
+                        if "doi.org/" in abs_url:
+                            doi_part = abs_url.split("doi.org/")[-1].lower().strip().split("?")[0].split("#")[0].strip("/")
+                            if doi_part:
+                                seen.add(doi_part)
+            except Exception as e:
+                print(f"Warning: failed to load existing ids from {output_path}: {e}", file=sys.stderr)
+        # 2) 历史所有原始文件（data/*.jsonl，排除 AI 增强文件）
+        #    采用全局去重而非仅 7 天，避免 cron 偶发漏跑或手动补录导致的跨周重复
+        data_dir = os.path.dirname(os.path.abspath(output_path)) if os.path.dirname(output_path) else "."
+        # 若 output_path 形如 ../data/2026-08-12.jsonl，需解析为绝对目录
+        if not os.path.isdir(data_dir):
+            data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
+            data_dir = os.path.normpath(data_dir)
+        if os.path.isdir(data_dir):
+            import glob as _glob
+            for hist_path in _glob.glob(os.path.join(data_dir, "*.jsonl")):
+                # 跳过 AI 增强文件与本次输出文件本身
+                if "_AI_enhanced_" in hist_path:
+                    continue
+                if os.path.abspath(hist_path) == os.path.abspath(output_path):
+                    continue
+                try:
+                    with open(hist_path, "r", encoding="utf-8") as rf:
+                        for line in rf:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                j = json.loads(line)
+                            except Exception:
+                                continue
+                            pid = str(j.get("id", "")).lower().strip()
+                            if pid:
+                                seen.add(pid)
+                            abs_url = j.get("abs") or ""
+                            if "doi.org/" in abs_url:
+                                doi_part = abs_url.split("doi.org/")[-1].lower().strip().split("?")[0].split("#")[0].strip("/")
+                                if doi_part:
+                                    seen.add(doi_part)
+                except Exception:
+                    continue
+        return seen
+
+    # 执行去重过滤
+    if formatted_papers:
+        existing_ids = _load_existing_ids_for_dedup(args.output)
+        deduped = []
+        seen_in_batch = set()
+        duplicate_in_batch = 0
+        duplicate_cross_date = 0
+        for p in formatted_papers:
+            pid = str(p.get("id", "")).lower().strip()
+            doi_part = ""
+            abs_url = p.get("abs") or ""
+            if "doi.org/" in abs_url:
+                doi_part = abs_url.split("doi.org/")[-1].lower().strip().split("?")[0].split("#")[0].strip("/")
+            # 同批次内去重
+            if pid and pid in seen_in_batch:
+                duplicate_in_batch += 1
+                continue
+            if doi_part and doi_part in seen_in_batch:
+                duplicate_in_batch += 1
+                continue
+            # 跨日期/跨文件去重
+            if (pid and pid in existing_ids) or (doi_part and doi_part in existing_ids):
+                duplicate_cross_date += 1
+                continue
+            deduped.append(p)
+            if pid:
+                seen_in_batch.add(pid)
+                existing_ids.add(pid)
+            if doi_part:
+                seen_in_batch.add(doi_part)
+                existing_ids.add(doi_part)
+        if duplicate_in_batch or duplicate_cross_date:
+            print(f"Deduplication: filtered {duplicate_in_batch} intra-batch duplicates and {duplicate_cross_date} cross-date duplicates; {len(deduped)}/{len(formatted_papers)} papers remain.", file=sys.stderr)
+        formatted_papers = deduped
+
     if formatted_papers:
         output_dir = os.path.dirname(args.output)
         if output_dir and not os.path.exists(output_dir):
