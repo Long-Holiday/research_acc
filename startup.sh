@@ -26,8 +26,8 @@ CRON_SCHEDULE_CRAWL="9 4 * * *"
 CRON_IDENTIFIER_CRAWL="PROJECT_IDENTIFIER=daily_arxiv_crawl"
 CRON_LINE_CRAWL="$CRON_SCHEDULE_CRAWL export PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin && cd $PROJECT_DIR && $CRON_IDENTIFIER_CRAWL ./run.sh >> $PROJECT_DIR/cron_crawl.log 2>&1"
 
-# 2. 期刊论文补录与缺失摘要定期修复定时任务 (每月 15 日和 30 日 18:00 自动执行，先补全所有期刊论文，再补全摘要)
-CRON_SCHEDULE_FIX="0 18 15,30 * *"
+# 2. 期刊论文补录与缺失摘要定期修复定时任务 (每周日 18:00 自动执行，先补全所有期刊论文，再补全摘要)
+CRON_SCHEDULE_FIX="0 18 * * 0"
 CRON_IDENTIFIER_FIX="PROJECT_IDENTIFIER=daily_paper_fix_abstracts"
 CRON_LINE_FIX="$CRON_SCHEDULE_FIX export PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin && cd $PROJECT_DIR && $CRON_IDENTIFIER_FIX ./run_fix_abstracts.sh >> $PROJECT_DIR/cron_fix_abstracts.log 2>&1"
 
@@ -45,10 +45,10 @@ add_cron() {
 
     # 2. 添加期刊论文补录与摘要修复任务
     if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_FIX" >/dev/null; then
-        echo "期刊论文补录与摘要修复定时任务 (每月 15/30 日 18:00) 已配置，无需重复添加。"
+        echo "期刊论文补录与摘要修复定时任务 (每周日 18:00) 已配置，无需重复添加。"
     else
         (crontab -l 2>/dev/null; echo "$CRON_LINE_FIX") | crontab -
-        echo "✅ 期刊论文补录与摘要修复定时任务已成功添加到系统 crontab 中 (每月 15 日和 30 日 18:00 自动执行，先补全所有期刊缺失论文，再补全摘要)。"
+        echo "✅ 期刊论文补录与摘要修复定时任务已成功添加到系统 crontab 中 (每周日 18:00 自动执行，先补全所有期刊缺失论文，再补全摘要)。"
     fi
 }
 
