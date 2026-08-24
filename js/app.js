@@ -753,7 +753,14 @@ function normalizePaper(paper, date) {
     rawDetails = paper.summary;
   }
   
-  const summary = paper.AI && paper.AI.tldr ? paper.AI.tldr : rawDetails;
+  let summary = rawDetails;
+  if (paper.AI && paper.AI.tldr && paper.AI.tldr !== '缺失摘要' && paper.AI.tldr !== 'Summary generation failed') {
+    summary = paper.AI.tldr;
+  } else if (rawDetails && rawDetails.trim().length > 0) {
+    summary = rawDetails;
+  } else if (paper.AI && paper.AI.tldr) {
+    summary = paper.AI.tldr;
+  }
   const hasAbstract = hasEnglishAbstract(rawDetails);
   
   return {
@@ -1392,10 +1399,7 @@ function showPaperDetails(paper, paperIndex) {
   }
   modalTitle.innerHTML = paperIndex ? `<span class="paper-index-badge">${paperIndex}</span> ${titleHtml}` : titleHtml;
   
-  const hasAbstract = paper.has_abstract !== undefined 
-    ? paper.has_abstract 
-    : hasEnglishAbstract(paper.details || paper.summary);
-  const abstractText = hasAbstract ? (paper.details || '') : '';
+  const abstractText = (paper.details && paper.details.trim()) ? paper.details.trim() : ((paper.summary && paper.summary.trim()) ? paper.summary.trim() : '');
   
   const categoryDisplay = paper.allCategories ? 
     paper.allCategories.join(', ') : 
