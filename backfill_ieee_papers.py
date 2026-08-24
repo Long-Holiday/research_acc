@@ -16,7 +16,7 @@ import re
 import argparse
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Set, Optional, Tuple
 from tqdm import tqdm
 
 # 将项目根目录与 daily_paper 加入 sys.path 以复用模块
@@ -42,6 +42,8 @@ from daily_paper.daily_journals import (
     find_arxiv_url,
     reconstruct_abstract
 )
+from fix_missing_abstracts import atomic_write_jsonl, is_abstract_missing
+
 
 # IEEE 目标期刊配置（供 --ieee-only 模式使用）
 IEEE_JOURNAL_TARGETS = [
@@ -205,6 +207,27 @@ def get_target_dates(args) -> List[str]:
     return all_dates
 
 
+def _normalize_title(title: Optional[str]) -> str:
+    if not title:
+        return ""
+    return re.sub(r"[^a-zA-Z0-9\u4e00-\u9fa5]", "", str(title).lower())
+
+
+def _extract_clean_doi(item: Dict) -> str:
+    for key in ("doi", "abs", "url", "pdf", "id"):
+        val = str(item.get(key) or "").strip().lower()
+        if not val:
+            continue
+        if "doi.org/" in val:
+            doi_part = val.split("doi.org/")[-1].split("?")[0].split("#")[0].strip("/")
+            if doi_part.startswith("10."):
+                return doi_part.replace("_", "/")
+        if val.startswith("10."):
+            doi_part = val.split("?")[0].split("#")[0].strip("/")
+            return doi_part.replace("_", "/")
+    return ""
+
+
 def load_existing_ids(filepath: str) -> Set[str]:
     """读取已有 JSONL 文件中的所有论文 ID 和 DOI 标识"""
     seen_ids = set()
@@ -218,17 +241,115 @@ def load_existing_ids(filepath: str) -> Set[str]:
                 continue
             try:
                 item = json.loads(line)
-                pid = item.get("id")
+                pid = str(item.get("id") or "").lower().strip()
                 if pid:
-                    seen_ids.add(str(pid).lower().strip())
-                # 同时也记录 DOI 去重
-                abs_url = item.get("abs") or ""
-                if "doi.org/" in abs_url:
-                    doi_part = abs_url.split("doi.org/")[-1].lower().strip()
-                    seen_ids.add(doi_part)
+                    clean_id = pid.replace("https://openalex.org/", "").replace("https://doi.org/", "").strip("/")
+                    seen_ids.add(clean_id)
+                    seen_ids.add(clean_id.replace("_", "/"))
+                    seen_ids.add(clean_id.replace("/", "_"))
+                doi = _extract_clean_doi(item)
+                if doi:
+                    seen_ids.add(doi)
+                    seen_ids.add(doi.replace("/", "_"))
             except Exception:
                 continue
     return seen_ids
+
+
+def upsert_jsonl_file(filepath: str, new_items: List[Dict]) -> Tuple[int, int]:
+    """将新论文条目就地更新替换或追加到目标 JSONL 文件中，返回 (replaced_count, appended_count)"""
+    if not new_items:
+        return 0, 0
+
+    new_by_id = {}
+    new_by_doi = {}
+    new_by_title = {}
+
+    for p in new_items:
+        pid = str(p.get("id") or "").strip().lower().replace("https://openalex.org/", "").replace("https://doi.org/", "").strip("/")
+        if pid:
+            new_by_id[pid] = p
+            new_by_id[pid.replace("_", "/")] = p
+            new_by_id[pid.replace("/", "_")] = p
+
+        doi = _extract_clean_doi(p)
+        if doi:
+            new_by_doi[doi] = p
+            new_by_doi[doi.replace("_", "/")] = p
+
+        title_norm = _normalize_title(p.get("title"))
+        if title_norm and len(title_norm) >= 10:
+            new_by_title[title_norm] = p
+
+    existing_items = []
+    replaced_count = 0
+    handled_keys = set()
+
+    if os.path.exists(filepath):
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                    pid = str(item.get("id") or "").strip().lower().replace("https://openalex.org/", "").replace("https://doi.org/", "").strip("/")
+                    doi = _extract_clean_doi(item)
+                    title_norm = _normalize_title(item.get("title"))
+
+                    matched_new = None
+                    if pid and pid in new_by_id:
+                        matched_new = new_by_id[pid]
+                    elif doi and doi in new_by_doi:
+                        matched_new = new_by_doi[doi]
+                    elif title_norm and title_norm in new_by_title:
+                        matched_new = new_by_title[title_norm]
+
+                    if matched_new:
+                        merged = {**item, **matched_new}
+                        # 保留已有 AI 字段
+                        if "AI" in item and ("AI" not in matched_new or not matched_new["AI"]):
+                            merged["AI"] = item["AI"]
+                        existing_items.append(merged)
+                        replaced_count += 1
+                        if pid:
+                            handled_keys.add(pid)
+                        if doi:
+                            handled_keys.add(doi)
+                        if title_norm:
+                            handled_keys.add(title_norm)
+                    else:
+                        existing_items.append(item)
+                except Exception:
+                    continue
+
+    appended_count = 0
+    for p in new_items:
+        pid = str(p.get("id") or "").strip().lower().replace("https://openalex.org/", "").replace("https://doi.org/", "").strip("/")
+        doi = _extract_clean_doi(p)
+        title_norm = _normalize_title(p.get("title"))
+
+        is_handled = False
+        if pid and pid in handled_keys:
+            is_handled = True
+        elif doi and doi in handled_keys:
+            is_handled = True
+        elif title_norm and title_norm in handled_keys:
+            is_handled = True
+
+        if not is_handled:
+            existing_items.append(p)
+            if pid:
+                handled_keys.add(pid)
+            if doi:
+                handled_keys.add(doi)
+            if title_norm:
+                handled_keys.add(title_norm)
+            appended_count += 1
+
+    atomic_write_jsonl(filepath, existing_items)
+    return replaced_count, appended_count
+
 
 
 def fetch_and_format_journal_papers(
@@ -544,30 +665,17 @@ def main():
         else:
             enhanced_items = []
 
-        # 2. 追加到原始 jsonl 文件
-        with open(raw_file, "a", encoding="utf-8") as f:
-            for p in date_new_papers:
-                f.write(json.dumps(p, ensure_ascii=False) + "\n")
-        print(f"💾 已成功将 {len(date_new_papers)} 篇论文追加至 {raw_file}")
-        total_backfilled_raw += len(date_new_papers)
+        # 2. 就地更新或追加到原始 jsonl 文件
+        raw_rep, raw_app = upsert_jsonl_file(raw_file, date_new_papers)
+        print(f"💾 原始文件 {raw_file}: 替换更新 {raw_rep} 篇，新增追加 {raw_app} 篇")
+        total_backfilled_raw += (raw_rep + raw_app)
 
-        # 3. 追加到 AI 增强 jsonl 文件
+        # 3. 就地更新或追加到 AI 增强 jsonl 文件
         if enhanced_items:
-            existing_enhanced_ids = load_existing_ids(enhanced_file)
-            appended_ai_count = 0
-            appended_ai_items = []
-            with open(enhanced_file, "a", encoding="utf-8") as f:
-                for ep in enhanced_items:
-                    epid = str(ep.get("id", "")).lower().strip()
-                    if epid not in existing_enhanced_ids:
-                        f.write(json.dumps(ep, ensure_ascii=False) + "\n")
-                        existing_enhanced_ids.add(epid)
-                        appended_ai_count += 1
-                        appended_ai_items.append(ep)
-            print(f"🤖 已成功将 {appended_ai_count} 篇 AI 增强论文追加至 {enhanced_file}")
-            total_backfilled_ai += appended_ai_count
-            if appended_ai_items:
-                keyword_sync_groups.append((date_str, language, appended_ai_items))
+            enh_rep, enh_app = upsert_jsonl_file(enhanced_file, enhanced_items)
+            print(f"🤖 AI 增强文件 {enhanced_file}: 替换更新 {enh_rep} 篇，新增追加 {enh_app} 篇")
+            total_backfilled_ai += (enh_rep + enh_app)
+            keyword_sync_groups.append((date_str, language, enhanced_items))
 
     # 4. 同步数据库
     if keyword_sync_groups and not args.dry_run and not args.skip_db_sync:

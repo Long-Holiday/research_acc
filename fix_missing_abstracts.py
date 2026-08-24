@@ -125,31 +125,45 @@ def is_abstract_missing(summary: Optional[str]) -> bool:
     return False
 
 
+def _normalize_title_text(title: Optional[str]) -> str:
+    if not title:
+        return ""
+    return re.sub(r"[^a-zA-Z0-9\u4e00-\u9fa5]", "", str(title).lower())
+
+
 def extract_identifiers(item: Dict) -> Tuple[str, str, str]:
     """从论文对象中提取 (doi, openalex_id, arxiv_url)"""
     doi = ""
     oa_id = ""
     arxiv_url = ""
 
-    # 1. 检查 abs 字段
-    abs_url = str(item.get("abs") or "").strip()
-    if "doi.org/" in abs_url:
-        doi = abs_url.split("doi.org/")[-1].strip().lower()
-    elif "openalex.org/" in abs_url:
-        oa_id = abs_url.split("openalex.org/")[-1].strip()
-    elif "arxiv.org/" in abs_url:
-        arxiv_url = abs_url
+    # 1. 检查 explicit doi 字段
+    if item.get("doi"):
+        raw_doi = str(item.get("doi")).strip().lower()
+        doi = raw_doi.replace("https://doi.org/", "").replace("http://dx.doi.org/", "").replace("_", "/")
 
-    # 2. 检查 id 字段
+    # 2. 检查 abs / url 字段
+    for fld in ("abs", "url"):
+        val = str(item.get(fld) or "").strip()
+        if "doi.org/" in val:
+            doi = val.split("doi.org/")[-1].strip().lower().split("?")[0].split("#")[0].strip("/")
+            doi = doi.replace("_", "/")
+        elif "openalex.org/" in val:
+            oa_id = val.split("openalex.org/")[-1].strip()
+        elif "arxiv.org/" in val and not arxiv_url:
+            arxiv_url = val
+
+    # 3. 检查 id 字段
     raw_id = str(item.get("id") or "").strip()
     if raw_id.startswith("10."):
         doi = raw_id.lower().replace("_", "/")
     elif raw_id.startswith("W") or (raw_id.isdigit() and len(raw_id) >= 8):
         oa_id = raw_id
     elif "/" in raw_id and "10." in raw_id:
-        doi = raw_id.lower()
+        idx = raw_id.find("10.")
+        doi = raw_id[idx:].lower().replace("_", "/")
 
-    # 3. 检查 pdf 字段
+    # 4. 检查 pdf 字段
     pdf_url = str(item.get("pdf") or "").strip()
     if not arxiv_url and "arxiv.org/" in pdf_url:
         arxiv_url = pdf_url
@@ -270,26 +284,36 @@ def enhance_papers_with_ai(
 
 
 def update_enhanced_file(enhanced_filepath: str, newly_enhanced_papers: List[Dict]):
-    """将新生成的 AI 增强条目精确就地替换或追加到已有的 AI 增强文件中"""
+    """将新生成的 AI 增强/摘要修复条目精确就地替换或追加到已有的 AI 增强文件中"""
     if not newly_enhanced_papers:
         return
-    
-    # 建立新条目的索引字典（以 ID 和 DOI 为 key）
+
+    # 构建新条目的多级索引
     new_by_id = {}
     new_by_doi = {}
+    new_by_title = {}
+
     for p in newly_enhanced_papers:
-        pid = str(p.get("id", "")).strip().lower()
+        pid = str(p.get("id", "")).strip().lower().replace("https://openalex.org/", "").replace("https://doi.org/", "").strip("/")
         if pid:
             new_by_id[pid] = p
-        abs_url = str(p.get("abs") or "").strip().lower()
-        if "doi.org/" in abs_url:
-            doi = abs_url.split("doi.org/")[-1].strip()
-            if doi:
-                new_by_doi[doi] = p
+            if "_" in pid:
+                new_by_id[pid.replace("_", "/")] = p
+            if "/" in pid:
+                new_by_id[pid.replace("/", "_")] = p
+
+        doi, _, _ = extract_identifiers(p)
+        if doi:
+            new_by_doi[doi] = p
+            new_by_doi[doi.replace("_", "/")] = p
+
+        title_norm = _normalize_title_text(p.get("title"))
+        if title_norm and len(title_norm) >= 10:
+            new_by_title[title_norm] = p
 
     existing_items = []
     replaced_count = 0
-    handled_new_ids = set()
+    handled_keys = set()
 
     if os.path.exists(enhanced_filepath):
         with open(enhanced_filepath, "r", encoding="utf-8") as f:
@@ -299,22 +323,31 @@ def update_enhanced_file(enhanced_filepath: str, newly_enhanced_papers: List[Dic
                     continue
                 try:
                     item = json.loads(line)
-                    pid = str(item.get("id", "")).strip().lower()
-                    abs_url = str(item.get("abs") or "").strip().lower()
-                    doi = abs_url.split("doi.org/")[-1].strip() if "doi.org/" in abs_url else ""
-                    
+                    pid = str(item.get("id", "")).strip().lower().replace("https://openalex.org/", "").replace("https://doi.org/", "").strip("/")
+                    doi, _, _ = extract_identifiers(item)
+                    title_norm = _normalize_title_text(item.get("title"))
+
                     matched_new = None
-                    if pid in new_by_id:
+                    if pid and pid in new_by_id:
                         matched_new = new_by_id[pid]
-                        handled_new_ids.add(pid)
                     elif doi and doi in new_by_doi:
                         matched_new = new_by_doi[doi]
-                        handled_new_ids.add(str(matched_new.get("id", "")).strip().lower())
+                    elif title_norm and title_norm in new_by_title:
+                        matched_new = new_by_title[title_norm]
 
                     if matched_new:
-                        # 摘要修复可以先于 AI 增强完成，合并字段以免覆盖已有的 AI 结果。
-                        existing_items.append({**item, **matched_new})
+                        # 确保英文 summary 正确合并覆盖，保留已有 AI 字典（若新条目未生成 AI）
+                        merged = {**item, **matched_new}
+                        if "AI" in item and ("AI" not in matched_new or not matched_new["AI"]):
+                            merged["AI"] = item["AI"]
+                        existing_items.append(merged)
                         replaced_count += 1
+                        if pid:
+                            handled_keys.add(pid)
+                        if doi:
+                            handled_keys.add(doi)
+                        if title_norm:
+                            handled_keys.add(title_norm)
                     else:
                         existing_items.append(item)
                 except Exception:
@@ -323,10 +356,26 @@ def update_enhanced_file(enhanced_filepath: str, newly_enhanced_papers: List[Dic
     # 追加尚未在旧增强文件中存在的其余条目
     appended_count = 0
     for p in newly_enhanced_papers:
-        pid = str(p.get("id", "")).strip().lower()
-        if pid not in handled_new_ids:
+        pid = str(p.get("id", "")).strip().lower().replace("https://openalex.org/", "").replace("https://doi.org/", "").strip("/")
+        doi, _, _ = extract_identifiers(p)
+        title_norm = _normalize_title_text(p.get("title"))
+
+        is_handled = False
+        if pid and pid in handled_keys:
+            is_handled = True
+        elif doi and doi in handled_keys:
+            is_handled = True
+        elif title_norm and title_norm in handled_keys:
+            is_handled = True
+
+        if not is_handled:
             existing_items.append(p)
-            handled_new_ids.add(pid)
+            if pid:
+                handled_keys.add(pid)
+            if doi:
+                handled_keys.add(doi)
+            if title_norm:
+                handled_keys.add(title_norm)
             appended_count += 1
 
     atomic_write_jsonl(enhanced_filepath, existing_items)
@@ -336,15 +385,20 @@ def update_enhanced_file(enhanced_filepath: str, newly_enhanced_papers: List[Dic
 def sync_database(paper_groups: List[Tuple[str, str, List[Dict]]]):
     """仅为本轮成功修复并重新增强的论文增量更新关键词与统计。"""
     try:
-        from server_modules.processor import reextract_keywords_for_papers, scan_and_process_files
+        from server_modules import processor
+        if hasattr(processor, "processed_files_cache"):
+            processor.processed_files_cache.clear()
+        if hasattr(processor, "cache_initialized"):
+            processor.cache_initialized = False
+
         paper_count = sum(len(papers) for _, _, papers in paper_groups)
         print(f"📊 正在为本次修复的 {paper_count} 篇论文重新提取关键词并增量同步 statistics.db...")
-        success = reextract_keywords_for_papers(paper_groups)
+        success = processor.reextract_keywords_for_papers(paper_groups)
         if success:
             print("✅ statistics.db 统计数据库与关键词网络已成功同步！")
         else:
             print("⚠️ 关键词提取过程报告警告，正在尝试常规扫描同步...")
-            scan_and_process_files()
+            processor.scan_and_process_files()
     except Exception as e:
         print(f"⚠️ 同步数据库时遇到警告或跳过: {e}")
 

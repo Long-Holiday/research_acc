@@ -13,10 +13,11 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set, Optional
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PROJECT_ROOT)
@@ -52,8 +53,83 @@ def _read_jsonl(path: str) -> List[Dict]:
     return items
 
 
-def _item_key(item: Dict) -> str:
-    return str(item.get("id") or "").strip().lower()
+def _normalize_title(title: Optional[str]) -> str:
+    if not title:
+        return ""
+    clean = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fa5]", "", str(title).lower())
+    return clean
+
+
+def _extract_doi_clean(item: Dict) -> str:
+    """从多个字段提取归一化的 DOI (小写、去除 https://doi.org/、将 _ 转换为 /)"""
+    for key in ("doi", "abs", "url", "pdf", "id"):
+        val = str(item.get(key) or "").strip().lower()
+        if not val:
+            continue
+        if "doi.org/" in val:
+            doi_part = val.split("doi.org/")[-1].split("?")[0].split("#")[0].strip("/")
+            if doi_part.startswith("10."):
+                return doi_part
+        if val.startswith("10."):
+            doi_part = val.split("?")[0].split("#")[0].strip("/")
+            return doi_part.replace("_", "/")
+        if "10." in val and "/" in val:
+            idx = val.find("10.")
+            doi_part = val[idx:].split("?")[0].split("#")[0].strip("/")
+            return doi_part.replace("_", "/")
+    return ""
+
+
+def _extract_id_variants(item: Dict) -> Set[str]:
+    """提取归一化 ID 及其常见变体"""
+    variants = set()
+    raw_id = str(item.get("id") or "").strip().lower()
+    if not raw_id:
+        return variants
+    
+    clean_id = raw_id.replace("https://openalex.org/", "").replace("https://doi.org/", "").strip("/")
+    variants.add(clean_id)
+    if "_" in clean_id:
+        variants.add(clean_id.replace("_", "/"))
+    if "/" in clean_id:
+        variants.add(clean_id.replace("/", "_"))
+    return variants
+
+
+def _build_item_index(items: List[Dict]) -> Tuple[Dict[str, Dict], Dict[str, Dict], Dict[str, Dict]]:
+    """构建多级索引: (id_map, doi_map, title_map)"""
+    id_map = {}
+    doi_map = {}
+    title_map = {}
+    
+    for item in items:
+        for v in _extract_id_variants(item):
+            id_map[v] = item
+        doi = _extract_doi_clean(item)
+        if doi:
+            doi_map[doi] = item
+        title_norm = _normalize_title(item.get("title"))
+        if title_norm and len(title_norm) >= 10:
+            title_map[title_norm] = item
+            
+    return id_map, doi_map, title_map
+
+
+def _find_matching_item(item: Dict, id_map: Dict, doi_map: Dict, title_map: Dict) -> Optional[Dict]:
+    """通过 ID -> DOI -> Title 多级查找匹配条目"""
+    for v in _extract_id_variants(item):
+        if v in id_map:
+            return id_map[v]
+    
+    doi = _extract_doi_clean(item)
+    if doi and doi in doi_map:
+        return doi_map[doi]
+        
+    title_norm = _normalize_title(item.get("title"))
+    if title_norm and len(title_norm) >= 10 and title_norm in title_map:
+        return title_map[title_norm]
+        
+    return None
 
 
 def _backup(path: str):
@@ -64,32 +140,53 @@ def _backup(path: str):
 
 
 def repair_file(raw_path: str, enhanced_path: str, dry_run=False, backup=False) -> List[Dict]:
-    """把原始文件中的有效摘要合并到增强文件，返回实际修复的论文。"""
-    raw_items = {
-        _item_key(item): item
-        for item in _read_jsonl(raw_path)
-        if _item_key(item) and not is_abstract_missing(item.get("summary"))
-    }
-    if not raw_items or not os.path.exists(enhanced_path):
+    """把原始文件中的有效摘要智能合并到增强文件，同时将增强文件有效摘要回填原始文件，返回实际修复的增强论文。"""
+    raw_items = _read_jsonl(raw_path) if os.path.exists(raw_path) else []
+    if not os.path.exists(enhanced_path):
         return []
 
     enhanced_items = _read_jsonl(enhanced_path)
-    repaired = []
-    changed = False
-    for item in enhanced_items:
-        key = _item_key(item)
-        raw_item = raw_items.get(key)
-        if not raw_item or not is_abstract_missing(item.get("summary")):
-            continue
-        item["summary"] = raw_item["summary"]
-        repaired.append(item)
-        changed = True
+    
+    # 建立原始文件中的有效摘要条目索引
+    valid_raw_items = [it for it in raw_items if not is_abstract_missing(it.get("summary"))]
+    raw_id_map, raw_doi_map, raw_title_map = _build_item_index(valid_raw_items)
+    
+    # 建立增强文件中的有效摘要条目索引 (供反向回填)
+    valid_enh_items = [it for it in enhanced_items if not is_abstract_missing(it.get("summary"))]
+    enh_id_map, enh_doi_map, enh_title_map = _build_item_index(valid_enh_items)
 
-    if changed and not dry_run:
+    repaired_enhanced = []
+    enhanced_changed = False
+    
+    # 1. 原始文件 -> 增强文件修复
+    for item in enhanced_items:
+        if not is_abstract_missing(item.get("summary")):
+            continue
+        matched_raw = _find_matching_item(item, raw_id_map, raw_doi_map, raw_title_map)
+        if matched_raw and not is_abstract_missing(matched_raw.get("summary")):
+            item["summary"] = matched_raw["summary"]
+            repaired_enhanced.append(item)
+            enhanced_changed = True
+
+    if enhanced_changed and not dry_run:
         if backup:
             _backup(enhanced_path)
         atomic_write_jsonl(enhanced_path, enhanced_items)
-    return repaired
+
+    # 2. 反向回填: 增强文件 -> 原始文件修复
+    raw_changed = False
+    if raw_items and valid_enh_items:
+        for item in raw_items:
+            if not is_abstract_missing(item.get("summary")):
+                continue
+            matched_enh = _find_matching_item(item, enh_id_map, enh_doi_map, enh_title_map)
+            if matched_enh and not is_abstract_missing(matched_enh.get("summary")):
+                item["summary"] = matched_enh["summary"]
+                raw_changed = True
+        if raw_changed and not dry_run:
+            atomic_write_jsonl(raw_path, raw_items)
+
+    return repaired_enhanced
 
 
 def sync_database(groups: List[Tuple[str, str, List[Dict]]], db_path: str):
@@ -97,9 +194,15 @@ def sync_database(groups: List[Tuple[str, str, List[Dict]]], db_path: str):
         return
     from server_modules import processor
 
-    old_db_path = processor.DB_PATH
+    old_db_path = getattr(processor, "DB_PATH", db_path)
     processor.DB_PATH = db_path
     try:
+        # 清除内存文件缓存，强制让数据库重新更新
+        if hasattr(processor, "processed_files_cache"):
+            processor.processed_files_cache.clear()
+        if hasattr(processor, "cache_initialized"):
+            processor.cache_initialized = False
+
         if not processor.reextract_keywords_for_papers(groups):
             raise RuntimeError("增量数据库同步失败")
     finally:
@@ -128,7 +231,6 @@ def main():
         enhanced_paths = sorted(glob.glob(os.path.join(args.data_dir, f"{date}_AI_enhanced_*.jsonl")))
         for enhanced_path in enhanced_paths:
             language = os.path.basename(enhanced_path).split("_AI_enhanced_", 1)[1][:-6]
-            # 统计增强文件中缺失英文摘要的总数，用于 dry-run 诊断
             try:
                 enhanced_items = _read_jsonl(enhanced_path)
                 missing_in_file = sum(1 for it in enhanced_items if is_abstract_missing(it.get("summary")))
@@ -147,7 +249,6 @@ def main():
                 if copyable:
                     print(f"{date} / {language}: 增强文件缺失 {missing_in_file} 篇，其中可从原始文件复制修复 {copyable} 篇")
                 else:
-                    # 原始文件同样缺失，无法通过复制修复
                     print(f"{date} / {language}: 增强文件缺失 {missing_in_file} 篇，原始文件亦无有效摘要（需远程拉取）")
             if repaired:
                 total_repaired += len(repaired)

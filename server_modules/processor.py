@@ -3,6 +3,7 @@ import json
 import re
 import math
 import threading
+from typing import Optional, List, Dict, Set, Tuple
 from server_modules.database import connect_db
 import server_modules.keywords as keywords
 
@@ -110,6 +111,40 @@ def get_db_path():
 
 _scan_lock = threading.Lock()
 
+def clear_processed_cache(filename: Optional[str] = None, clear_db: bool = True):
+    """清理已处理文件缓存，方便文件更新后重新扫描入库"""
+    global cache_initialized
+    if filename:
+        processed_files_cache.discard(filename)
+        if clear_db:
+            try:
+                with db_lock:
+                    conn = connect_db(get_db_path())
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM processed_files WHERE filename = ?", (filename,))
+                        conn.commit()
+                    finally:
+                        conn.close()
+            except Exception:
+                pass
+    else:
+        processed_files_cache.clear()
+        cache_initialized = False
+        if clear_db:
+            try:
+                with db_lock:
+                    conn = connect_db(get_db_path())
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM processed_files")
+                        conn.commit()
+                    finally:
+                        conn.close()
+            except Exception:
+                pass
+
+
 def scan_and_process_files():
     global cache_initialized
     import sys
@@ -167,10 +202,11 @@ def scan_and_process_files():
                             row[0].lower(): math.log((1 + total_papers) / (1 + row[1])) + 1
                             for row in df_rows if row[0]
                         }
-                    elif total_papers == 0:
+                    elif not need_idf_refresh and keywords.idf_cache:
+                        pass
+                    else:
                         keywords.idf_cache = {}
-                except Exception as idf_err:
-                    print(f"Error initializing IDF cache: {idf_err}")
+                except Exception:
                     keywords.idf_cache = {}
                     keywords.idf_doc_count = 0
                     
@@ -180,19 +216,12 @@ def scan_and_process_files():
                 for filename, paper_date, lang in files_to_process:
                     cursor.execute("SELECT 1 FROM processed_files WHERE filename = ?", (filename,))
                     already_processed = cursor.fetchone() is not None
-                    
-                    cursor.execute("SELECT 1 FROM papers WHERE paper_date = ? AND language = ? LIMIT 1", (paper_date, lang))
-                    already_in_papers = cursor.fetchone() is not None
-                    
-                    if already_processed and already_in_papers:
-                        processed_files_cache.add(filename)
-                        continue
 
-                    # --- 全局跨日期去重：加载同 language 下已存在的 paper_id 集合 ---
+                    # --- 全局跨日期去重：加载同 language 下其他日期已存在的 paper_id 集合 ---
                     # 防止不同日期的 AI 增强文件包含同一期刊论文时重复入库
                     existing_global_ids = set()
                     try:
-                        cursor.execute("SELECT paper_id FROM papers WHERE language = ?", (lang,))
+                        cursor.execute("SELECT paper_id FROM papers WHERE language = ? AND paper_date != ?", (lang, paper_date))
                         for (pid,) in cursor.fetchall():
                             if pid:
                                 existing_global_ids.add(str(pid))
@@ -264,16 +293,16 @@ def scan_and_process_files():
                             # 同文件内去重
                             if paper_id_str in seen_in_file:
                                 continue
-                            # 跨日期全局去重（同 language 下 paper_id 已存在则跳过）
+                            # 跨日期全局去重（同 language 下 paper_id 在其他日期已存在则跳过）
                             if paper_id_str in existing_global_ids:
                                 continue
                             seen_in_file.add(paper_id_str)
                             existing_global_ids.add(paper_id_str)
                                 
-                            if not already_in_papers:
-                                papers_buf.append((paper_id_str, paper_date, lang, json.dumps(paper_item)))
-                                if len(papers_buf) >= CHUNK_PAPERS:
-                                    flush_papers()
+                            # 保证最新 paper_json 始终写入 papers 表
+                            papers_buf.append((paper_id_str, paper_date, lang, json.dumps(paper_item)))
+                            if len(papers_buf) >= CHUNK_PAPERS:
+                                flush_papers()
                                     
                             if not already_processed:
                                 cats = paper_item.get("categories", [])

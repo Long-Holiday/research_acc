@@ -756,8 +756,14 @@ def test_reextract_keywords_api():
         assert trigger_resp.status_code == 200
         assert trigger_resp.json()["status"] in ("started", "running")
 
+        # 轮询等待异步重提取任务完成
+        for _ in range(30):
+            st = processor.get_reextract_status()
+            if st.get("status") == "completed":
+                break
+            time.sleep(0.2)
+
         # 检查重提取后关键词查询接口是否正常返回最新提取的词
-        time.sleep(0.5)
         kw_resp = client.get(
             "/api/stats/keywords?start_date=2026-07-22&end_date=2026-07-22&lang=Chinese&category=All",
             headers=headers

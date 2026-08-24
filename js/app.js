@@ -746,7 +746,13 @@ function normalizePaper(paper, date) {
     ? paper.categories 
     : (paper.categories ? [paper.categories] : []);
   
-  const rawDetails = paper.summary || '';
+  let rawDetails = '';
+  if (paper.details && typeof paper.details === 'string') {
+    rawDetails = paper.details;
+  } else if (paper.summary && typeof paper.summary === 'string') {
+    rawDetails = paper.summary;
+  }
+  
   const summary = paper.AI && paper.AI.tldr ? paper.AI.tldr : rawDetails;
   const hasAbstract = hasEnglishAbstract(rawDetails);
   

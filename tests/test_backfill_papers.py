@@ -13,6 +13,7 @@ from backfill_ieee_papers import (
     get_target_journals,
     get_target_dates,
     load_existing_ids,
+    upsert_jsonl_file,
     IEEE_JOURNAL_TARGETS,
 )
 from daily_paper.daily_journals import JOURNALS
@@ -117,3 +118,59 @@ def test_get_target_dates():
             args = parse_args()
             targets = get_target_dates(args)
             assert targets == [d2]
+
+
+def test_upsert_jsonl_file():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        jsonl_path = os.path.join(tmpdir, "test_upsert.jsonl")
+        
+        # 初始条目
+        initial_items = [
+            {
+                "id": "10.1109_tgrs.2026.0001",
+                "doi": "10.1109/tgrs.2026.0001",
+                "title": "Old Paper 1",
+                "summary": "No abstract available"
+            },
+            {
+                "id": "10.1109_tgrs.2026.0002",
+                "doi": "10.1109/tgrs.2026.0002",
+                "title": "Paper 2",
+                "summary": "Existing summary 2"
+            }
+        ]
+        with open(jsonl_path, "w", encoding="utf-8") as f:
+            for it in initial_items:
+                f.write(json.dumps(it) + "\n")
+
+        # 准备更新条目：p1 用标准斜杠 DOI 格式更新，p3 是新增
+        new_items = [
+            {
+                "id": "https://openalex.org/W111111",
+                "abs": "https://doi.org/10.1109/tgrs.2026.0001",
+                "title": "Old Paper 1",
+                "summary": "This is a newly backfilled and complete abstract for Paper 1."
+            },
+            {
+                "id": "https://openalex.org/W333333",
+                "abs": "https://doi.org/10.1109/tgrs.2026.0003",
+                "title": "Brand New Paper 3",
+                "summary": "Summary for paper 3"
+            }
+        ]
+
+        rep_count, app_count = upsert_jsonl_file(jsonl_path, new_items)
+        assert rep_count == 1
+        assert app_count == 1
+
+        results = []
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                results.append(json.loads(line))
+
+        assert len(results) == 3
+        # 确认 p1 的 summary 被正确更新覆盖
+        assert results[0]["summary"] == "This is a newly backfilled and complete abstract for Paper 1."
+        assert results[1]["summary"] == "Existing summary 2"
+        assert results[2]["title"] == "Brand New Paper 3"
+
