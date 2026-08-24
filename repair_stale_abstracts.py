@@ -119,6 +119,8 @@ def main():
     groups = []
     total_repaired = 0
 
+    total_enhanced_missing = 0
+    total_copyable = 0
     for raw_path in raw_paths:
         date = os.path.basename(raw_path)[:-6]
         if args.date and date != args.date:
@@ -126,23 +128,46 @@ def main():
         enhanced_paths = sorted(glob.glob(os.path.join(args.data_dir, f"{date}_AI_enhanced_*.jsonl")))
         for enhanced_path in enhanced_paths:
             language = os.path.basename(enhanced_path).split("_AI_enhanced_", 1)[1][:-6]
+            # 统计增强文件中缺失英文摘要的总数，用于 dry-run 诊断
+            try:
+                enhanced_items = _read_jsonl(enhanced_path)
+                missing_in_file = sum(1 for it in enhanced_items if is_abstract_missing(it.get("summary")))
+                total_enhanced_missing += missing_in_file
+            except Exception:
+                missing_in_file = 0
             repaired = repair_file(
                 raw_path,
                 enhanced_path,
                 dry_run=args.dry_run,
                 backup=args.backup,
             )
+            if missing_in_file:
+                copyable = len(repaired)
+                total_copyable += copyable
+                if copyable:
+                    print(f"{date} / {language}: 增强文件缺失 {missing_in_file} 篇，其中可从原始文件复制修复 {copyable} 篇")
+                else:
+                    # 原始文件同样缺失，无法通过复制修复
+                    print(f"{date} / {language}: 增强文件缺失 {missing_in_file} 篇，原始文件亦无有效摘要（需远程拉取）")
             if repaired:
                 total_repaired += len(repaired)
                 groups.append((date, language, repaired))
-                print(f"{date} / {language}: 修复 {len(repaired)} 篇")
+                if not args.dry_run:
+                    print(f"{date} / {language}: 修复 {len(repaired)} 篇")
 
     if not total_repaired:
-        print("未发现需要修复的存量摘要数据。")
+        if total_enhanced_missing:
+            print(f"诊断完成：增强文件中共 {total_enhanced_missing} 篇缺失英文摘要，但原始文件同样缺失，无法通过本地复制修复。")
+            print("→ 请运行 `python fix_missing_abstracts.py`（或带 --dry-run 预览）从 OpenAlex / Crossref / arXiv 等远程拉取摘要，")
+            print("  成功后会自动同步到增强文件并刷新前端显示。")
+        else:
+            print("未发现需要修复的存量摘要数据。")
         return 0
 
     if args.dry_run:
-        print(f"[dry-run] 共发现 {total_repaired} 篇，不写入文件或数据库。")
+        print(f"[dry-run] 共发现可复制修复 {total_repaired} 篇（增强缺失总数 {total_enhanced_missing}，其中可复制 {total_copyable} 篇），不写入文件或数据库。")
+        if total_enhanced_missing > total_copyable:
+            print(f"另有 {total_enhanced_missing - total_copyable} 篇原始与增强文件均缺失，需运行 fix_missing_abstracts.py 远程修复。")
         return 0
 
     if not args.skip_db_sync:
