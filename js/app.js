@@ -1163,11 +1163,8 @@ function formatAuthorsForCard(authorsString, authorTerms = []) {
 
 function createPaperCard(paper, globalIndex, clickIndex) {
   const paperCard = document.createElement('div');
-  const hasAbstract = paper.has_abstract !== undefined 
-    ? paper.has_abstract 
-    : hasEnglishAbstract(paper.details || paper.summary);
   
-  paperCard.className = `paper-card ${paper.isMatched ? 'matched-paper' : ''} ${hasAbstract ? 'has-abstract' : 'no-abstract'}`;
+  paperCard.className = `paper-card ${paper.isMatched ? 'matched-paper' : ''}`;
   paperCard.dataset.id = paper.id || paper.url;
   
   if (paper.isMatched && paper.matchReason) {
@@ -1179,10 +1176,6 @@ function createPaperCard(paper, globalIndex, clickIndex) {
     : (Array.isArray(paper.category) 
         ? paper.category.map(cat => `<span class="category-tag">${cat}</span>`).join('')
         : `<span class="category-tag">${paper.category || ''}</span>`);
-  
-  const abstractBadge = hasAbstract
-    ? `<span class="abstract-tag has-abstract" title="包含英文摘要 / English Abstract Available"><svg class="abstract-icon" viewBox="0 0 16 16" width="11" height="11" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg>有英文摘要</span>`
-    : `<span class="abstract-tag no-abstract" title="缺失英文摘要 / No English Abstract"><svg class="abstract-icon" viewBox="0 0 16 16" width="11" height="11" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>无英文摘要</span>`;
   
   const titleSummaryTerms = [];
   if (activeKeywords.length > 0) {
@@ -1216,7 +1209,6 @@ function createPaperCard(paper, globalIndex, clickIndex) {
       <p class="paper-card-authors">${formattedAuthors}</p>
       <div class="paper-card-categories">
         ${categoryTags}
-        ${abstractBadge}
       </div>
     </div>
     <div class="paper-card-body">
@@ -1392,10 +1384,7 @@ function showPaperDetails(paper, paperIndex) {
   }
   modalTitle.innerHTML = paperIndex ? `<span class="paper-index-badge">${paperIndex}</span> ${titleHtml}` : titleHtml;
   
-  const hasAbstract = paper.has_abstract !== undefined 
-    ? paper.has_abstract 
-    : hasEnglishAbstract(paper.details || paper.summary);
-  const abstractText = hasAbstract ? (paper.details || '') : '';
+  const abstractText = (paper.details && paper.details.trim()) ? paper.details.trim() : ((paper.summary && paper.summary.trim()) ? paper.summary.trim() : '');
   
   const categoryDisplay = paper.allCategories ? 
     paper.allCategories.join(', ') : 
