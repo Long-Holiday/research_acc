@@ -312,7 +312,8 @@ def update_enhanced_file(enhanced_filepath: str, newly_enhanced_papers: List[Dic
                         handled_new_ids.add(str(matched_new.get("id", "")).strip().lower())
 
                     if matched_new:
-                        existing_items.append(matched_new)
+                        # 摘要修复可以先于 AI 增强完成，合并字段以免覆盖已有的 AI 结果。
+                        existing_items.append({**item, **matched_new})
                         replaced_count += 1
                     else:
                         existing_items.append(item)
@@ -477,7 +478,10 @@ def main():
         atomic_write_jsonl(raw_filepath, file_items)
         print(f"   💾 已更新原始文件: {raw_filepath}")
 
-        # 2. 对成功恢复摘要的论文执行 AI 增强
+        # 2. 先同步增强文件中的原始摘要。即使后续 AI 增强失败，前端也能立即看到英文摘要。
+        update_enhanced_file(enhanced_filepath, file_rescued_items)
+
+        # 3. 对成功恢复摘要的论文执行 AI 增强
         if not args.skip_ai:
             enhanced_papers = enhance_papers_with_ai(
                 file_rescued_items,
@@ -487,10 +491,24 @@ def main():
             )
             total_ai_processed += len(enhanced_papers)
 
-            # 3. 就地更新或追加到 AI 增强 JSONL 文件中
+            # 4. 用 AI 结果覆盖增强文件中的对应条目
             update_enhanced_file(enhanced_filepath, enhanced_papers)
-            if enhanced_papers:
-                keyword_sync_groups.append((date_str, language, enhanced_papers))
+
+            # 数据库同步使用摘要修复后的完整集合，AI 结果存在时优先使用 AI 结果。
+            enhanced_by_id = {
+                str(p.get("id", "")).strip().lower(): p
+                for p in enhanced_papers
+                if p.get("id")
+            }
+            sync_papers = [
+                enhanced_by_id.get(str(p.get("id", "")).strip().lower(), p)
+                for p in file_rescued_items
+                if p.get("id")
+            ]
+            if sync_papers:
+                keyword_sync_groups.append((date_str, language, sync_papers))
+        else:
+            keyword_sync_groups.append((date_str, language, file_rescued_items))
 
     # 4. 统计数据库同步
     if keyword_sync_groups and not args.dry_run and not args.skip_db_sync:

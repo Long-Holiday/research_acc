@@ -123,6 +123,29 @@ def test_update_enhanced_file():
         assert p3_res["AI"]["tldr"] == "Appended TLDR"
 
 
+def test_update_enhanced_file_preserves_existing_ai_when_only_summary_is_repaired():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        enhanced_file = os.path.join(tmpdir, "test_enhanced.jsonl")
+        atomic_write_jsonl(enhanced_file, [{
+            "id": "p1",
+            "title": "Paper 1",
+            "summary": "No abstract available",
+            "AI": {"tldr": "Existing TLDR"}
+        }])
+
+        update_enhanced_file(enhanced_file, [{
+            "id": "p1",
+            "title": "Paper 1",
+            "summary": "A repaired English abstract with enough detail."
+        }])
+
+        with open(enhanced_file, "r", encoding="utf-8") as f:
+            result = json.loads(f.readline())
+
+        assert result["summary"] == "A repaired English abstract with enough detail."
+        assert result["AI"]["tldr"] == "Existing TLDR"
+
+
 def test_parse_args_days_range():
     import sys
     from unittest.mock import patch
@@ -136,4 +159,3 @@ def test_parse_args_days_range():
         args = parse_args()
         assert args.from_date == "2026-07-01"
         assert args.to_date == "2026-07-15"
-
