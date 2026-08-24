@@ -86,7 +86,7 @@ def test_process_single_item_success():
     chain = MockChain()
     item = {
         "title": "Pixel Stress Indexing",
-        "summary": "Plant diseases cause global losses."
+        "summary": "Plant diseases cause global losses in agricultural production and food security."
     }
     res = process_single_item(chain, item, "Chinese")
     assert "AI" in res
@@ -96,7 +96,7 @@ def test_process_single_item_fallback():
     chain = MockChain(should_fail=True)
     item = {
         "title": "Pixel Stress Indexing",
-        "summary": "Plant diseases cause global losses."
+        "summary": "Plant diseases cause global losses in agricultural production and food security."
     }
     res = process_single_item(chain, item, "Chinese")
     assert "AI" in res

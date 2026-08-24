@@ -99,7 +99,7 @@ def is_abstract_missing(summary: Optional[str]) -> bool:
     if not summary or not isinstance(summary, str):
         return True
     s = summary.strip()
-    if len(s) < 25:
+    if len(s) < 50:
         return True
     lower = s.lower().rstrip(".").strip()
     invalid_phrases = [

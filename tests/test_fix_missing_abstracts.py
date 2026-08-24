@@ -18,6 +18,8 @@ def test_is_abstract_missing():
     assert is_abstract_missing(None) is True
     assert is_abstract_missing("   ") is True
     assert is_abstract_missing("Too short") is True
+    assert is_abstract_missing("A" * 49) is True
+    assert is_abstract_missing("A" * 50) is False
     assert is_abstract_missing("No abstract available in OpenAlex.") is True
     assert is_abstract_missing("no abstract available.") is True
     assert is_abstract_missing("No abstract available") is True

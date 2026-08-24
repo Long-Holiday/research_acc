@@ -27,7 +27,7 @@ def test_repair_file_copies_raw_abstract_and_preserves_ai(tmp_path):
 def test_repair_file_dry_run_does_not_write(tmp_path):
     raw_path = tmp_path / "2026-08-19.jsonl"
     enhanced_path = tmp_path / "2026-08-19_AI_enhanced_Chinese.jsonl"
-    raw_path.write_text(json.dumps({"id": "p1", "summary": "A valid repaired English abstract."}) + "\n", encoding="utf-8")
+    raw_path.write_text(json.dumps({"id": "p1", "summary": "A valid repaired English abstract with enough detailed description."}) + "\n", encoding="utf-8")
     original = json.dumps({"id": "p1", "summary": "No abstract available"}) + "\n"
     enhanced_path.write_text(original, encoding="utf-8")
 
