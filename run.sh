@@ -4,10 +4,34 @@
 # 主要工作流由系统级 cron 调度或本地手动执行
 # Main workflow is scheduled by system-level cron or executed locally
 
+# 解析命令行参数 / Parse command line arguments
+TARGET_DATE=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --date|-d)
+            TARGET_DATE="$2"
+            shift 2
+            ;;
+        *)
+            if [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+                TARGET_DATE="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
 # 加载 .env 配置文件 / Load .env configuration
 if [ -f .env ]; then
     echo "加载 .env 配置文件... / Loading .env configuration..."
     export $(grep -v '^#' .env | xargs)
+fi
+
+# 优先使用命令行参数，其次使用环境变量 TARGET_DATE
+if [ -n "$TARGET_DATE" ]; then
+    CUSTOM_DATE="$TARGET_DATE"
+elif [ -n "$DATE" ]; then
+    CUSTOM_DATE="$DATE"
 fi
 
 # 环境变量检查和提示 / Environment variables check and prompt
@@ -76,10 +100,16 @@ if [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
-# 获取当前日期 / Get current date
-today=$(TZ='UTC' date "+%Y-%m-%d")
+# 获取目标日期（如指定则使用自定义日期，否则默认当天 UTC 日期）
+if [ -n "$CUSTOM_DATE" ]; then
+    today="$CUSTOM_DATE"
+    echo "📅 使用指定目标日期: $today"
+else
+    today=$(TZ='UTC' date "+%Y-%m-%d")
+    echo "📅 使用默认当天日期: $today"
+fi
 
-echo "本地测试：爬取 $today 的arXiv论文... / Local test: Crawling $today arXiv papers..."
+echo "本地工作流：爬取 $today 的arXiv及期刊论文... / Crawling papers for date $today..."
 
 # 第一步：爬取数据 / Step 1: Crawl data
 echo "步骤1：开始爬取... / Step 1: Starting crawl..."
