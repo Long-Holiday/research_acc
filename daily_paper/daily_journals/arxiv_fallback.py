@@ -25,19 +25,29 @@ def fetch_arxiv_abstract(oa_url):
         time.sleep(3.0 - elapsed)
     _last_arxiv_request_time = time.time()
 
-    try:
-        url = f'https://export.arxiv.org/api/query?id_list={arxiv_id}&max_results=1'
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            root = ET.fromstring(resp.content)
-            entries = root.findall('{http://www.w3.org/2005/Atom}entry')
-            if entries:
-                summary_elem = entries[0].find('{http://www.w3.org/2005/Atom}summary')
-                if summary_elem is not None and summary_elem.text:
-                    abstract = summary_elem.text.strip().replace('\n', ' ')
-                    return abstract
-    except Exception as e:
-        print(f"Failed to fetch arXiv abstract for {arxiv_id}: {e}", file=sys.stderr)
+    headers = {
+        "User-Agent": "daily-arxiv-research/1.0 (mailto:dw-dengwei@users.noreply.github.com)"
+    }
+    url = f'https://export.arxiv.org/api/query?id_list={arxiv_id}&max_results=1'
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.content)
+                entries = root.findall('{http://www.w3.org/2005/Atom}entry')
+                if entries:
+                    summary_elem = entries[0].find('{http://www.w3.org/2005/Atom}summary')
+                    if summary_elem is not None and summary_elem.text:
+                        abstract = summary_elem.text.strip().replace('\n', ' ')
+                        return abstract
+            elif resp.status_code == 429:
+                time.sleep(3.0 * (attempt + 1))
+                continue
+            break
+        except Exception as e:
+            if attempt == 2:
+                print(f"Failed to fetch arXiv abstract for {arxiv_id}: {e}", file=sys.stderr)
+            time.sleep(2.0)
     return None
 
 def find_arxiv_url(paper):

@@ -18,21 +18,30 @@ class ArxivSpider(scrapy.Spider):
     allowed_domains = ["arxiv.org"]  # 允许爬取的域名
 
     def parse(self, response):
-        # 提取每篇论文的信息
-        anchors = []
+        # 查找 replacements（替换更新）的起始锚点编号，避免爬取历史更新的旧论文
+        replacements_anchor = None
         for li in response.css("div[id=dlpage] ul li"):
-            href = li.css("a::attr(href)").get()
-            if href and "item" in href:
-                anchors.append(int(href.split("item")[-1]))
+            text = li.css("::text").get() or ""
+            href = li.css("a::attr(href)").get() or ""
+            if "replacements" in text.lower() and "item" in href:
+                try:
+                    replacements_anchor = int(href.split("item")[-1])
+                except ValueError:
+                    pass
 
-        # 遍历每篇论文的详细信息
+        # 遍历每篇论文的详细信息 (<dt> 与 <dd> 成对出现)
         for paper in response.css("dl dt"):
             paper_anchor = paper.css("a[name^='item']::attr(name)").get()
             if not paper_anchor:
                 continue
                 
-            paper_id = int(paper_anchor.split("item")[-1])
-            if anchors and paper_id >= anchors[-1]:
+            try:
+                paper_id_num = int(paper_anchor.split("item")[-1])
+            except ValueError:
+                paper_id_num = None
+
+            # 排除 Replacements 区域中的论文
+            if replacements_anchor is not None and paper_id_num is not None and paper_id_num >= replacements_anchor:
                 continue
 
             # 获取论文ID
@@ -40,38 +49,58 @@ class ArxivSpider(scrapy.Spider):
             if not abstract_link:
                 continue
                 
-            arxiv_id = abstract_link.split("/")[-1]
+            arxiv_id = abstract_link.split("/")[-1].strip()
             
             # 获取对应的论文描述部分 (dd元素)
             paper_dd = paper.xpath("following-sibling::dd[1]")
             if not paper_dd:
                 continue
             
-            # 提取论文分类信息 - 在subjects部分
-            subjects_text = paper_dd.css(".list-subjects .primary-subject::text").get()
-            if not subjects_text:
-                # 如果找不到主分类，尝试其他方式获取分类
-                subjects_text = paper_dd.css(".list-subjects::text").get()
+            # 1. 提取标题 (Title) - 去除开头的 "Title:" 标签
+            title_text = "".join(paper_dd.css("div.list-title ::text").getall()).strip()
+            title = re.sub(r"^Title:\s*", "", title_text, flags=re.IGNORECASE).strip()
+            title = " ".join(title.split())
             
-            if subjects_text:
-                # 解析分类信息，通常格式如 "Computer Vision and Pattern Recognition (cs.CV)"
-                # 提取括号中的分类代码
-                categories_in_paper = re.findall(r'\(([^)]+)\)', subjects_text)
-                
-                # 检查论文分类是否与目标分类有交集
-                paper_categories = set(categories_in_paper)
-                if paper_categories.intersection(self.target_categories):
-                    yield {
-                        "id": arxiv_id,
-                        "categories": list(paper_categories),  # 添加分类信息用于调试
-                    }
-                    self.logger.info(f"Found paper {arxiv_id} with categories {paper_categories}")
-                else:
-                    self.logger.debug(f"Skipped paper {arxiv_id} with categories {paper_categories} (not in target {self.target_categories})")
-            else:
-                # 如果无法获取分类信息，记录警告但仍然返回论文（保持向后兼容）
-                self.logger.warning(f"Could not extract categories for paper {arxiv_id}, including anyway")
-                yield {
-                    "id": arxiv_id,
-                    "categories": [],
-                }
+            # 2. 提取作者列表 (Authors)
+            authors = [a.strip() for a in paper_dd.css("div.list-authors a::text").getall() if a.strip()]
+            
+            # 3. 提取备注信息 (Comments)
+            comments_elem = paper_dd.css("div.list-comments")
+            comment = None
+            if comments_elem:
+                c_text = "".join(comments_elem.css("::text").getall()).strip()
+                c_text = re.sub(r"^Comments?:\s*", "", c_text, flags=re.IGNORECASE).strip()
+                comment = " ".join(c_text.split()) if c_text else None
+            
+            # 4. 提取论文分类 (Subjects & Categories)
+            subjects_elem = paper_dd.css("div.list-subjects")
+            subjects_text = "".join(subjects_elem.css("::text").getall()) if subjects_elem else ""
+            categories_in_paper = re.findall(r"\(([^)]+)\)", subjects_text)
+            paper_categories = [c.strip() for c in categories_in_paper if c.strip()]
+            
+            # 5. 提取完整摘要 (Summary / Abstract)
+            summary_elem = paper_dd.css("p.mathjax, p")
+            summary = ""
+            if summary_elem:
+                s_text = "".join(summary_elem[0].css("::text").getall()).strip()
+                s_text = re.sub(r"^Abstract:\s*", "", s_text, flags=re.IGNORECASE).strip()
+                summary = " ".join(s_text.split())
+
+            # 检查论文分类是否与目标分类有交集
+            categories_set = set(paper_categories)
+            if self.target_categories and not categories_set.intersection(self.target_categories):
+                self.logger.debug(f"Skipped paper {arxiv_id} with categories {categories_set} (not in target {self.target_categories})")
+                continue
+
+            item = {
+                "id": arxiv_id,
+                "categories": paper_categories,
+                "pdf": f"https://arxiv.org/pdf/{arxiv_id}",
+                "abs": f"https://arxiv.org/abs/{arxiv_id}",
+                "authors": authors,
+                "title": title,
+                "comment": comment,
+                "summary": summary,
+            }
+            self.logger.info(f"Parsed paper {arxiv_id}: {title[:50]}... ({len(summary)} chars abstract)")
+            yield item

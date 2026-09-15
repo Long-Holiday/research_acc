@@ -162,6 +162,8 @@ class AbstractFetcher:
                             abstract = summary_el.text.strip().replace('\n', ' ')
                             self._cache[cache_key] = abstract
                             return abstract
+            elif resp.status_code == 429:
+                time.sleep(2.0)
         except Exception:
             pass
 
