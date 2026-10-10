@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from app.auth import verify_token
 from server_modules.database import connect_db
 import app.config as config
-from ai.advisor import (
+from server_modules.advisor_helpers import (
     get_advisor_topic,
     set_advisor_topic,
     parse_ideas_json,

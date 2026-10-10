@@ -24,7 +24,7 @@ def test_help_has_no_business_imports():
         [sys.executable, "maintenance.py", "--help"], capture_output=True, text=True,
     )
     assert result.returncode == 0
-    for command in ("advisor-backfill", "advisor-regenerate", "keywords-reextract", "keywords-filter"):
+    for command in ("data-process", "advisor-backfill", "advisor-regenerate", "keywords-reextract", "keywords-filter"):
         assert command in result.stdout
         command_help = subprocess.run(
             ["bash", "run_maintenance.sh", command, "--help"], capture_output=True, text=True,

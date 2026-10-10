@@ -5,6 +5,9 @@ set -euo pipefail
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
 if command -v uv >/dev/null 2>&1; then
     PYTHON_EXEC=(uv run python)
 elif [[ -x "$PROJECT_DIR/.venv/bin/python" ]]; then

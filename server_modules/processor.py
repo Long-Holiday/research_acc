@@ -20,6 +20,11 @@ def _init_tables(cursor):
         processed_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
     """)
+    # 兼容旧库；同名增强文件发生修复或重跑时需要重新入库。
+    columns = {row[1] for row in cursor.execute("PRAGMA table_info(processed_files)")}
+    for column in ("mtime_ns", "file_size"):
+        if column not in columns:
+            cursor.execute(f"ALTER TABLE processed_files ADD COLUMN {column} INTEGER")
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS keyword_stats (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,6 +100,7 @@ def _init_tables(cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pk_keyword ON paper_keywords (keyword)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pk_lang_date_cat_kw ON paper_keywords (language, paper_date, category, keyword)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_papers_date_lang ON papers (paper_date, language)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_papers_lang_date_id ON papers (language, paper_date DESC, paper_id ASC)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agg_kw_lang_cat_date ON agg_daily_keywords (language, category, paper_date)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agg_kw_lang_date ON agg_daily_keywords (language, paper_date)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agg_papers_lang_date ON agg_daily_papers (language, paper_date)")
@@ -145,30 +151,20 @@ def clear_processed_cache(filename: Optional[str] = None, clear_db: bool = True)
                 pass
 
 
-def scan_and_process_files():
+def scan_and_process_files(data_dir="data", db_path=None):
+    """每日流水线调用：只处理新增或变化的完整增强文件。"""
     global cache_initialized
-    import sys
-    is_testing = "pytest" in sys.modules or "unittest" in sys.modules
-    db_dir = "data"
-    os.makedirs(db_dir, exist_ok=True)
-    actual_db_path = get_db_path()
-    if is_testing or not os.path.exists(actual_db_path):
-        processed_files_cache.clear()
-        cache_initialized = False
-    
-    # 1. Quick check outside the lock if cache is initialized
-    files = os.listdir(db_dir)
+    db_dir = os.fspath(data_dir)
+    if not os.path.isdir(db_dir):
+        raise FileNotFoundError(f"数据目录不存在: {db_dir}")
+    actual_db_path = os.fspath(db_path) if db_path is not None else get_db_path()
+    os.makedirs(os.path.dirname(os.path.abspath(actual_db_path)), exist_ok=True)
     target_files = []
-    for f in files:
-        if f.endswith(".jsonl") and "_AI_enhanced_" in f:
-            parts = f.replace(".jsonl", "").split("_AI_enhanced_")
-            if len(parts) == 2:
-                target_files.append((f, parts[0], parts[1]))
-                
-    if cache_initialized:
-        new_files = [tf for tf in target_files if tf[0] not in processed_files_cache]
-        if not new_files:
-            return  # No new files to process! Skip entire database lock & queries.
+    for filename in sorted(os.listdir(db_dir)):
+        match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})_AI_enhanced_([a-zA-Z]+)\.jsonl", filename)
+        if match and os.path.isfile(os.path.join(db_dir, filename)):
+            stat = os.stat(os.path.join(db_dir, filename))
+            target_files.append((filename, *match.groups(), stat.st_mtime_ns, stat.st_size))
 
     with _scan_lock:
         with db_lock:
@@ -178,14 +174,12 @@ def scan_and_process_files():
                 _init_tables(cursor)
                 conn.commit()
                 
-                # Load processed files into cache if not initialized
-                if not cache_initialized:
-                    cursor.execute("SELECT filename FROM processed_files")
-                    rows = cursor.fetchall()
-                    for row in rows:
-                        processed_files_cache.add(row[0])
-                    cache_initialized = True
-                    
+                cursor.execute("SELECT filename, mtime_ns, file_size FROM processed_files")
+                fingerprints = {filename: (mtime_ns, file_size) for filename, mtime_ns, file_size in cursor}
+                files_to_process = [tf for tf in target_files if fingerprints.get(tf[0]) != tf[3:]]
+                if not files_to_process:
+                    return 0
+
                 # Rebuild/refresh global IDF cache from existing papers using DB aggregate queries
                 try:
                     cursor.execute("SELECT COUNT(*) FROM papers")
@@ -210,12 +204,11 @@ def scan_and_process_files():
                     keywords.idf_cache = {}
                     keywords.idf_doc_count = 0
                     
-                # Filter files to process again inside lock
-                files_to_process = [tf for tf in target_files if tf[0] not in processed_files_cache]
-                
-                for filename, paper_date, lang in files_to_process:
-                    cursor.execute("SELECT 1 FROM processed_files WHERE filename = ?", (filename,))
-                    already_processed = cursor.fetchone() is not None
+                cursor.execute("BEGIN IMMEDIATE")
+                for filename, paper_date, lang, mtime_ns, file_size in files_to_process:
+                    # 同日期/语言整批替换，删除旧聚合，避免修复后关键词频率重复累加。
+                    for table in ("papers", "paper_keywords", "keyword_stats", "agg_daily_papers", "agg_daily_keywords"):
+                        cursor.execute(f"DELETE FROM {table} WHERE paper_date = ? AND language = ?", (paper_date, lang))
 
                     # --- 全局跨日期去重：加载同 language 下其他日期已存在的 paper_id 集合 ---
                     # 防止不同日期的 AI 增强文件包含同一期刊论文时重复入库
@@ -230,8 +223,6 @@ def scan_and_process_files():
                     seen_in_file = set()
                         
                     filepath = os.path.join(db_dir, filename)
-                    if not os.path.exists(filepath):
-                        continue
                         
                     # 分块缓冲写入，避免一次性在内存中累积整批论文/关键词列表导致 OOM。
                     CHUNK_PAPERS = 500
@@ -280,10 +271,7 @@ def scan_and_process_files():
                             return
                             
                         # 1. 批量提取关键词
-                        if not already_processed:
-                            batch_kws = keywords.extract_keywords_batch(batch_items, batch_size=BATCH_NLP_SIZE)
-                        else:
-                            batch_kws = [[] for _ in batch_items]
+                        batch_kws = keywords.extract_keywords_batch(batch_items, batch_size=BATCH_NLP_SIZE)
                             
                         for paper_item, keywords_with_freq in zip(batch_items, batch_kws):
                             paper_id = paper_item.get("id")
@@ -304,47 +292,45 @@ def scan_and_process_files():
                             if len(papers_buf) >= CHUNK_PAPERS:
                                 flush_papers()
                                     
-                            if not already_processed:
-                                cats = paper_item.get("categories", [])
-                                category = "unknown"
-                                if isinstance(cats, list) and len(cats) > 0:
-                                    category = cats[0]
-                                elif isinstance(cats, str):
-                                    cats_split = re.split(r"[,\s]+", cats.strip())
-                                    if cats_split and cats_split[0]:
-                                        category = cats_split[0]
-                                        
-                                # Merge OpenAlex concepts if available
-                                concepts = paper_item.get("concepts", [])
-                                if isinstance(concepts, list):
-                                    for concept in concepts:
-                                        if concept and isinstance(concept, str):
-                                            keywords_with_freq.append((concept.lower(), 2))
-                                
-                                # Group same keywords in the same paper to avoid duplicate key violations
-                                unique_kws = {}
-                                for kw, freq in keywords_with_freq:
-                                    unique_kws[kw] = unique_kws.get(kw, 0) + freq
+                            cats = paper_item.get("categories", [])
+                            category = "unknown"
+                            if isinstance(cats, list) and len(cats) > 0:
+                                category = cats[0]
+                            elif isinstance(cats, str):
+                                cats_split = re.split(r"[,\s]+", cats.strip())
+                                if cats_split and cats_split[0]:
+                                    category = cats_split[0]
                                     
-                                for kw, freq in unique_kws.items():
-                                    paper_keywords_buf.append((paper_id, paper_date, lang, category, kw))
-                                    key = (paper_date, lang, category, kw)
-                                    stats_map[key] = stats_map.get(key, 0) + freq
-                                    
-                                if len(paper_keywords_buf) >= CHUNK_KEYWORDS:
-                                    flush_keywords()
-                                    flush_stats()
+                            # Merge OpenAlex concepts if available
+                            concepts = paper_item.get("concepts", [])
+                            if isinstance(concepts, list):
+                                for concept in concepts:
+                                    if concept and isinstance(concept, str):
+                                        keywords_with_freq.append((concept.lower(), 2))
+
+                            # Group same keywords in the same paper to avoid duplicate key violations
+                            unique_kws = {}
+                            for kw, freq in keywords_with_freq:
+                                unique_kws[kw] = unique_kws.get(kw, 0) + freq
+
+                            for kw, freq in unique_kws.items():
+                                paper_keywords_buf.append((paper_id, paper_date, lang, category, kw))
+                                key = (paper_date, lang, category, kw)
+                                stats_map[key] = stats_map.get(key, 0) + freq
+
+                            if len(paper_keywords_buf) >= CHUNK_KEYWORDS:
+                                flush_keywords()
+                                flush_stats()
 
                     with open(filepath, "r", encoding="utf-8") as f_in:
                         for line in f_in:
                             line_str = line.strip()
                             if not line_str:
                                 continue
-                            try:
-                                paper = json.loads(line_str)
-                            except Exception:
-                                continue
-                                
+                            paper = json.loads(line_str)
+                            if not isinstance(paper, dict) or not paper.get("id"):
+                                raise ValueError(f"无效论文数据: {filename}")
+
                             current_batch.append(paper)
                             if len(current_batch) >= BATCH_NLP_SIZE:
                                 process_current_batch(current_batch)
@@ -358,10 +344,13 @@ def scan_and_process_files():
                     flush_keywords()
                     flush_stats()
                         
-                    if not already_processed:
-                        cursor.execute("INSERT OR REPLACE INTO processed_files (filename) VALUES (?)", (filename,))
-                    
-                    processed_files_cache.add(filename)
+                    current_stat = os.stat(filepath)
+                    if (current_stat.st_mtime_ns, current_stat.st_size) != (mtime_ns, file_size):
+                        raise RuntimeError(f"处理期间文件发生变化，稍后重试: {filename}")
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO processed_files (filename, mtime_ns, file_size) VALUES (?, ?, ?)",
+                        (filename, mtime_ns, file_size),
+                    )
                     
                     # Incrementally update aggregation tables for the processed date, lang
                     cursor.execute("""
@@ -381,6 +370,11 @@ def scan_and_process_files():
                     """, (paper_date, lang))
                 
                 conn.commit()
+                processed_files_cache.update(tf[0] for tf in files_to_process)
+                cache_initialized = True
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
 
@@ -390,6 +384,7 @@ def scan_and_process_files():
                 clear_stats_cache()
             except Exception:
                 pass
+    return len(files_to_process)
 
 
 def reextract_keywords_for_papers(paper_groups):

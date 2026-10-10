@@ -16,8 +16,9 @@ def _cleanup():
                 pass
 
 @pytest.fixture(autouse=True)
-def setup_test_db(monkeypatch):
+def setup_test_db(monkeypatch, tmp_path):
     import server_modules.processor as processor
+    monkeypatch.chdir(tmp_path)
     os.makedirs("data", exist_ok=True)
     _cleanup()
     monkeypatch.setattr(processor, "DB_PATH", TEST_DB_PATH)

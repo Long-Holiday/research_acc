@@ -6,8 +6,6 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from app.auth import verify_token
 from server_modules.database import connect_db
-from server_modules.processor import scan_and_process_files
-import server_modules.processor as processor
 from server_modules.analytics import community_detection
 import app.config as config
 
@@ -237,8 +235,9 @@ def get_db_path():
     import server
     if hasattr(server, "DB_PATH") and getattr(server, "DB_PATH") != "data/statistics.db":
         return getattr(server, "DB_PATH")
-    if hasattr(processor, "DB_PATH") and getattr(processor, "DB_PATH") != "data/statistics.db":
-        return getattr(processor, "DB_PATH")
+    processor = sys.modules.get("server_modules.processor")
+    if getattr(processor, "DB_PATH", "data/statistics.db") != "data/statistics.db":
+        return processor.DB_PATH
     return config.DB_PATH
 
 @router.get("/api/stats/categories")
@@ -248,12 +247,6 @@ def get_categories_stats(
     lang: str = "en",
     token: str = Depends(verify_token)
 ):
-    if IS_TESTING:
-        try:
-            scan_and_process_files()
-        except Exception:
-            pass
-            
     db_path = get_db_path()
     if not os.path.exists(db_path):
         return {"categories": [], "category_counts": {}, "total_all": 0}
@@ -304,12 +297,6 @@ def get_keyword_stats(
     category: str = "All", 
     token: str = Depends(verify_token)
 ):
-    if IS_TESTING:
-        try:
-            scan_and_process_files()
-        except Exception as e:
-            pass
-            
     db_path = get_db_path()
     if not os.path.exists(db_path):
         return {"keywords": [], "daily_trends": []}
@@ -442,12 +429,6 @@ def get_network_stats(
     exclude: str = "",
     token: str = Depends(verify_token)
 ):
-    if IS_TESTING:
-        try:
-            scan_and_process_files()
-        except Exception as e:
-            pass
-            
     db_path = get_db_path()
     if not os.path.exists(db_path):
         return {"nodes": [], "links": []}

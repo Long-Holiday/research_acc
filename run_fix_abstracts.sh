@@ -2,10 +2,10 @@
 
 # 定时任务执行脚本：
 # 1. 自动检测并补全所有期刊在过去 15-30 天内缺失的论文并进行 AI 增强
-# 2. 自动检测并修复过去 15-30 天内缺失摘要的论文，完成最终 AI 增强与数据库同步
+# 2. 自动检测并修复过去 15-30 天内缺失摘要的论文并完成 AI 增强，数据库留到每日流水线统一处理
 # Scheduled Fix Script:
 # 1. Backfill missing papers for all journals published 15-30 days ago
-# 2. Detect & fix missing abstracts for papers, and sync statistics database
+# 2. Detect & fix missing abstracts; defer database processing to the daily pipeline
 
 cd "$(dirname "$0")"
 PROJECT_DIR="$(pwd)"
@@ -50,17 +50,17 @@ else
 fi
 
 echo ""
-echo "▶️  [步骤 2/2] 开始检测并补全缺失摘要，并同步统计数据库..."
+echo "▶️  [步骤 2/2] 开始检测并补全缺失摘要，数据库留到每日流水线统一处理..."
 echo "--------------------------------------------------------------------------"
-# 步骤 2 执行：检测并补全所有缺失摘要，完成 AI 增强并同步 statistics.db
-$PYTHON_EXEC fix_missing_abstracts.py "${PARAMS[@]}"
+# 仅修复源文件和增强文件，不在周末同步数据库。
+$PYTHON_EXEC fix_missing_abstracts.py --skip-db-sync "${PARAMS[@]}"
 STEP2_EXIT=$?
 
 if [ $STEP2_EXIT -ne 0 ]; then
-    echo "❌ [$(date '+%Y-%m-%d %H:%M:%S')] 步骤 2 (摘要修复与数据库同步) 执行异常 (退出码: $STEP2_EXIT)"
+    echo "❌ [$(date '+%Y-%m-%d %H:%M:%S')] 步骤 2 (摘要修复与 AI 增强) 执行异常 (退出码: $STEP2_EXIT)"
     FINAL_EXIT=$STEP2_EXIT
 else
-    echo "✅ [$(date '+%Y-%m-%d %H:%M:%S')] 步骤 2 (摘要修复与数据库同步) 执行完毕。"
+    echo "✅ [$(date '+%Y-%m-%d %H:%M:%S')] 步骤 2 (摘要修复与 AI 增强) 执行完毕。"
     FINAL_EXIT=0
 fi
 

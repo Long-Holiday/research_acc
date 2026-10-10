@@ -30,6 +30,9 @@ def build_parser():
     parser = argparse.ArgumentParser(description="独立维护任务（不使用 Web API）")
     commands = parser.add_subparsers(dest="command", required=True)
 
+    processing = commands.add_parser("data-process", help="统一增量入库完整增强文件与关键词统计")
+    add_paths(processing, data=True)
+
     backfill = commands.add_parser("advisor-backfill", help="只补齐历史研报")
     add_paths(backfill, data=True)
     backfill.add_argument("--topic")
@@ -147,6 +150,12 @@ def main(argv=None):
     try:
         # 业务模块的日志不能污染可重定向的 JSON 输出。
         with redirect_stdout(sys.stderr):
+            if args.command == "data-process":
+                from server_modules.processor import scan_and_process_files
+
+                count = scan_and_process_files(data_dir=args.data_dir, db_path=args.db_path)
+                print(f"数据处理完成：更新 {count} 个增强文件", file=sys.stderr)
+                return 0
             if args.command.startswith("advisor-"):
                 return run_advisor(args)
             if args.command == "keywords-reextract":

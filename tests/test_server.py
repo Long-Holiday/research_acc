@@ -1,7 +1,29 @@
 import os
 import json
+from pathlib import Path
+import pytest
 from fastapi.testclient import TestClient
 from server import app
+from server_modules.processor import scan_and_process_files
+
+
+@pytest.fixture(autouse=True)
+def isolated_server_data(tmp_path, monkeypatch):
+    import server
+    import server_modules.processor as processor
+    import server_modules.stats as stats
+
+    root = Path(__file__).resolve().parents[1]
+    for name in ("index.html", "login.html", "settings.html", "statistic.html", "advisor.html", "maintenance.html", "css", "js", "assets"):
+        (tmp_path / name).symlink_to(root / name)
+    (tmp_path / "data").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(server, "DB_PATH", "data/statistics.db", raising=False)
+    monkeypatch.setattr(processor, "DB_PATH", "data/statistics.db")
+    processor.processed_files_cache.clear()
+    stats.clear_stats_cache()
+    stats._hot_papers_memory_cache.clear()
+
 
 client = TestClient(app)
 
@@ -99,6 +121,7 @@ def test_auth_and_data_apis():
         }) + "\n")
     
     try:
+        scan_and_process_files()
         # Get dates
         response = client.get("/api/dates", headers=headers)
         assert response.status_code == 200
@@ -206,6 +229,7 @@ def test_stats_apis():
             except Exception:
                 pass
 
+        scan_and_process_files()
         # Trigger API keywords
         response = client.get("/api/stats/keywords?start_date=2026-07-09&end_date=2026-07-09&lang=Chinese&category=All", headers=headers)
         assert response.status_code == 200
@@ -299,6 +323,7 @@ def test_papers_range_api():
             except Exception:
                 pass
 
+        scan_and_process_files()
         # Trigger API papers range for date range containing both
         response = client.get("/api/papers/range?start_date=2020-07-08&end_date=2020-07-09&lang=Chinese", headers=headers)
         assert response.status_code == 200
@@ -517,6 +542,7 @@ def test_keyword_growth_rate_is_confidence_adjusted():
             except Exception:
                 pass
 
+        scan_and_process_files()
         # Trigger API keywords
         response = client.get(
             "/api/stats/keywords?start_date=2026-07-07&end_date=2026-07-09&lang=Chinese&category=All",
@@ -592,6 +618,7 @@ def test_papers_pagination():
             }) + "\n")
             
     try:
+        scan_and_process_files()
         # 1. 不传 page 参数：应该返回全量列表 5 条（向下兼容）
         resp_full = client.get("/api/papers?date=2026-07-20&lang=Chinese", headers=headers)
         assert resp_full.status_code == 200
@@ -676,6 +703,7 @@ def test_papers_range_pagination():
             }) + "\n")
             
     try:
+        scan_and_process_files()
         # 分页查询 range
         resp = client.get("/api/papers/range?start_date=2026-07-21&end_date=2026-07-21&lang=Chinese&page=1&page_size=2", headers=headers)
         assert resp.status_code == 200

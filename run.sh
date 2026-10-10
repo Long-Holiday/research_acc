@@ -4,6 +4,10 @@
 # 主要工作流由系统级 cron 调度或本地手动执行
 # Main workflow is scheduled by system-level cron or executed locally
 
+# 将科学计算库限制为单线程，降低每日处理的资源峰值。
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
 # 解析命令行参数 / Parse command line arguments
 TARGET_DATE=""
 while [[ $# -gt 0 ]]; do
@@ -173,7 +177,15 @@ if [ "$PARTIAL_MODE" = "false" ]; then
     echo "✅ AI增强处理完成 / AI enhancement processing completed"
     cd ..
 
-    echo "步骤4：生成学术导师前沿分析与科研思路研报（含历史补漏）... / Step 4: Generating Academic Advisor Report..."
+    echo "步骤4：统一增量入库论文与关键词统计... / Step 4: Processing completed data..."
+    python maintenance.py data-process
+    if [ $? -ne 0 ]; then
+        echo "❌ 数据入库失败，停止后续流程 / Data processing failed"
+        exit 1
+    fi
+    echo "✅ 数据入库完成 / Data processing completed"
+
+    echo "步骤5：生成学术导师前沿分析与科研思路研报（含历史补漏）... / Step 5: Generating Academic Advisor Report..."
     python ai/advisor.py --date "${today}" --backfill
     
     if [ $? -ne 0 ]; then
@@ -193,6 +205,7 @@ if [ "$PARTIAL_MODE" = "false" ]; then
     echo "   ✅ 数据爬取 / Data crawling"
     echo "   ✅ 去重检查 / Smart duplicate check"
     echo "   ✅ AI增强处理 / AI enhancement"
+    echo "   ✅ 论文入库与关键词统计 / Paper indexing and keyword statistics"
     echo "   ✅ 学术导师研报生成 / Academic Advisor report generation"
 else
     echo "🔄 部分流程已完成 / Partial workflow finished:"
