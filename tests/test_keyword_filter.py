@@ -69,18 +69,6 @@ def test_filter_meaningless_keywords_llm_mock(monkeypatch):
         assert "Diffusion Model" not in excluded
         assert "Sentinel-2" not in excluded
 
-def test_api_stats_keywords_ai_filter():
-    headers = get_auth_header()
-    payload = {
-        "keywords": ["proposed approach", "comparative study", "CLIP", "Deep Learning"],
-        "category": "All"
-    }
-    resp = client.post("/api/stats/keywords/ai-filter", json=payload, headers=headers)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "success"
-    assert "excluded_keywords" in data
-    assert "proposed approach" in data["excluded_keywords"]
-    assert "comparative study" in data["excluded_keywords"]
-    assert "CLIP" not in data["excluded_keywords"]
-    assert data["total_checked"] == 4
+def test_api_stats_keywords_ai_filter_removed():
+    resp = client.post("/api/stats/keywords/ai-filter", json={"keywords": []}, headers=get_auth_header())
+    assert resp.status_code == 404

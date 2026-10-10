@@ -62,15 +62,6 @@
                         </div>
                     </div>
 
-                    <!-- Action Buttons -->
-                    <button id="backfillBtn" class="action-btn secondary" title="按时间正序回溯生成所有缺失历史日期的研报">
-                        <span>⏳ 历史补漏</span>
-                    </button>
-                    
-                    <button id="regenerateBtn" class="action-btn primary" title="重新生成当前日期的研报">
-                        <span>🔄 重新生成</span>
-                    </button>
-
                     <button id="logoutButton" onclick="Auth.logout()" class="icon-button" title="退出登录" style="border: none; background: transparent; cursor: pointer; color: #e74c3c; display: none;">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M17 7L15.59 8.41L18.17 11H8V13H18.17L15.59 15.59L17 17L22 12L17 7ZM4 5H12V3H4C2.9 3 2 3.9 2 5V19C2 20.1 2.9 21 4 21H12V19H4V5Z" fill="currentColor"/>
@@ -94,15 +85,14 @@
             <!-- Loading State -->
             <div id="loadingState" class="state-container" style="display: none;">
                 <div class="spinner"></div>
-                <p id="loadingText">正在生成学术导师研报，请稍候（预计需 15-30 秒）...</p>
+                <p id="loadingText">正在读取学术导师研报，请稍候...</p>
             </div>
 
             <!-- Empty State -->
             <div id="emptyState" class="state-container" style="display: none;">
                 <div class="empty-icon">🎓</div>
                 <h3>尚无当前日期的导师研报</h3>
-                <p>点击上方“重新生成”或“历史补漏”开始 AI 研研与思路设计</p>
-                <button id="emptyGenerateBtn" class="action-btn primary" style="margin-top: 15px;">立即生成今日研报</button>
+                <p>请通过 Bash 维护命令生成研报，完成后刷新页面查看。</p>
             </div>
 
             <!-- Report Container Cards -->

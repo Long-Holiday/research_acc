@@ -1,39 +1,21 @@
-import os
-import json
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 from server import app
 import server
 import server_modules.processor as processor
 from server_modules.database import connect_db
 
 client = TestClient(app)
-TEST_DB_PATH = "data/test_advisor_api.db"
-
-def _cleanup():
-    for ext in ["", "-wal", "-shm"]:
-        p = TEST_DB_PATH + ext
-        if os.path.exists(p):
-            try:
-                os.remove(p)
-            except Exception:
-                pass
-
 @pytest.fixture(autouse=True)
-def setup_api_env(monkeypatch):
-    server.ACCESS_PASSWORD = "testpassword"
-    os.makedirs("data", exist_ok=True)
-    _cleanup()
-        
-    monkeypatch.setattr(server, "DB_PATH", TEST_DB_PATH)
-    monkeypatch.setattr(processor, "DB_PATH", TEST_DB_PATH)
-    
-    # Run schema creation
-    processor.scan_and_process_files()
+def setup_api_env(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "ACCESS_PASSWORD", "testpassword")
+    monkeypatch.setattr(server, "DB_PATH", str(tmp_path / "advisor.db"))
+    monkeypatch.setattr(processor, "DB_PATH", server.DB_PATH)
+    conn = connect_db(server.DB_PATH)
+    processor._init_tables(conn.cursor())
+    conn.commit()
+    conn.close()
 
-    yield
-    _cleanup()
 
 def get_auth_header():
     resp = client.post("/api/auth/login", json={"password": "testpassword"})
@@ -53,7 +35,7 @@ def test_advisor_report_not_found():
 
 
 def test_advisor_report_repairs_malformed_ideas_json():
-    conn = connect_db(TEST_DB_PATH)
+    conn = connect_db(server.DB_PATH)
     conn.execute(
         """
         INSERT INTO advisor_reports
@@ -86,28 +68,11 @@ def test_advisor_settings_get_and_post():
     assert resp.json()["topic"] == new_topic
 
 
-def test_force_generation_is_queued():
-    headers = get_auth_header()
-    report = {
-        "report_date": "2026-08-08",
-        "topic": "Remote Sensing",
-        "summary_takeaway": "摘要",
-        "report_markdown": "# 报告",
-        "ideas_json": [],
-        "cached": False,
-    }
-    with patch("server_modules.advisor.generate_advisor_report", return_value=report):
-        resp = client.post(
-            "/api/advisor/generate",
-            json={"date": "2026-08-08", "force": True},
-            headers=headers,
-        )
-
-    assert resp.status_code == 202
-    assert resp.json()["status"] == "processing"
-    status = client.get(
-        "/api/advisor/generate/status?date=2026-08-08",
-        headers=headers,
-    )
-    assert status.status_code == 200
-    assert status.json()["status"] == "success"
+@pytest.mark.parametrize("method,path", [
+    ("post", "/api/advisor/generate"),
+    ("post", "/api/advisor/backfill"),
+    ("get", "/api/advisor/generate/status?date=2026-08-08"),
+])
+def test_advisor_maintenance_endpoints_removed(method, path):
+    response = getattr(client, method)(path, headers=get_auth_header())
+    assert response.status_code == 404

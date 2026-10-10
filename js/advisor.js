@@ -44,9 +44,6 @@ const AdvisorApp = {
     },
 
     bindEvents() {
-        document.getElementById('backfillBtn').addEventListener('click', () => this.handleBackfill());
-        document.getElementById('regenerateBtn').addEventListener('click', () => this.handleGenerate(true));
-        document.getElementById('emptyGenerateBtn').addEventListener('click', () => this.handleGenerate(true));
         document.getElementById('editTopicBtn').addEventListener('click', () => this.openTopicModal());
         document.getElementById('closeTopicModalBtn').addEventListener('click', () => this.closeTopicModal());
         document.getElementById('cancelTopicModalBtn').addEventListener('click', () => this.closeTopicModal());
@@ -480,110 +477,6 @@ const AdvisorApp = {
                 }
             });
         });
-    },
-
-    async handleGenerate(force = false) {
-        this.showState('loading', '正在提交 AI 学术导师研报生成任务...');
-        try {
-            const dateStr = this.currentDate;
-            const resp = await Auth.fetchWithAuth('/api/advisor/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    date: dateStr,
-                    force: force
-                })
-            });
-
-            const parsed = await this.readResponse(resp);
-            if (!resp.ok) {
-                throw new Error(this.responseError(resp, parsed));
-            }
-
-            const data = parsed.data;
-            if (data && data.status === 'processing') {
-                await this.waitForGeneration(dateStr);
-                return;
-            }
-            if (!data || typeof data !== 'object' || !data.report) {
-                throw new Error(this.responseError(resp, parsed));
-            }
-            this.currentReport = data.report;
-            this.renderReport(data.report);
-            this.showState('report');
-            this.showToast('✅ 导师研报生成成功！');
-            await this.loadAvailableDates();
-        } catch (e) {
-            console.error('Generate failed:', e);
-            alert(`生成导师研报失败: ${e.message}`);
-            this.showState('empty');
-        }
-    },
-
-    async waitForGeneration(dateStr) {
-        const maxAttempts = 300;
-        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            const resp = await Auth.fetchWithAuth(
-                `/api/advisor/generate/status?date=${encodeURIComponent(dateStr)}`
-            );
-            const parsed = await this.readResponse(resp);
-            if (!resp.ok) {
-                throw new Error(this.responseError(resp, parsed));
-            }
-
-            const data = parsed.data || {};
-            if (data.status === 'success') {
-                await this.loadReportForDate(dateStr);
-                this.showToast('✅ 导师研报生成成功！');
-                await this.loadAvailableDates();
-                return;
-            }
-            if (data.status === 'failed') {
-                throw new Error(data.error || '导师研报生成失败');
-            }
-
-            this.showState(
-                'loading',
-                `后台正在生成导师研报，请稍候（${Math.floor((attempt + 1) * 2 / 60)} 分钟）...`
-            );
-        }
-
-        throw new Error('研报生成时间过长，请稍后刷新页面查看结果');
-    },
-
-    async handleBackfill(force = false) {
-        if (!force && !confirm('确定开始扫描并补全所有缺失的历史研报吗？系统将在后台按时间升序挨个生成。')) {
-            return;
-        }
-
-        try {
-            const resp = await Auth.fetchWithAuth('/api/advisor/backfill', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ force: force })
-            });
-
-            if (resp.ok) {
-                const { data } = await this.readResponse(resp);
-                if (!data || typeof data !== 'object') {
-                    throw new Error(this.responseError(resp, { data: null, text: '' }));
-                }
-                if (data.status === 'already_complete') {
-                    if (confirm('所有缺失研报已补全。是否要强制重新生成所有历史研报？（此操作耗时较长）')) {
-                        this.handleBackfill(true);
-                    }
-                } else {
-                    this.showToast('⏳ 历史研报补漏任务已提交后台处理中...');
-                }
-            } else {
-                throw new Error('提交补漏任务失败');
-            }
-        } catch (e) {
-            console.error('Backfill error:', e);
-            alert(`历史补漏失败: ${e.message}`);
-        }
     },
 
     showState(state, loadingText = '') {

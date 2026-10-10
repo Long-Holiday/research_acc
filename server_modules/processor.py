@@ -550,7 +550,7 @@ def get_reextract_status():
     with reextract_lock:
         return dict(reextract_status)
 
-def reextract_all_keywords():
+def reextract_all_keywords(data_dir="data", db_path=None):
     global cache_initialized, reextract_status
     with reextract_lock:
         if reextract_status.get("status") == "running":
@@ -565,19 +565,24 @@ def reextract_all_keywords():
         }
 
     try:
-        db_dir = "data"
-        os.makedirs(db_dir, exist_ok=True)
-        
+        db_dir = os.fspath(data_dir)
+        target_db_path = os.fspath(db_path) if db_path is not None else get_db_path()
+        if not os.path.isdir(db_dir):
+            raise FileNotFoundError(f"数据目录不存在: {db_dir}")
+
         # 查找所有增强数据文件
         files = sorted(os.listdir(db_dir))
         target_files = []
         for f in files:
-            if f.endswith(".jsonl") and "_AI_enhanced_" in f:
+            if f.endswith(".jsonl") and "_AI_enhanced_" in f and os.path.isfile(os.path.join(db_dir, f)):
                 parts = f.replace(".jsonl", "").split("_AI_enhanced_")
                 if len(parts) == 2:
                     target_files.append((f, parts[0], parts[1]))
                     
         total_files = len(target_files)
+        if not total_files:
+            raise ValueError(f"没有可供重新提取的增强数据文件: {db_dir}")
+        os.makedirs(os.path.dirname(os.path.abspath(target_db_path)), exist_ok=True)
         with reextract_lock:
             reextract_status["total"] = total_files
             reextract_status["message"] = f"正在重置历史关键词缓存 (共 {total_files} 个文件)..."
@@ -586,7 +591,7 @@ def reextract_all_keywords():
             processed_files_cache.clear()
             cache_initialized = False
             
-            conn = connect_db(DB_PATH)
+            conn = connect_db(target_db_path)
             try:
                 cursor = conn.cursor()
                 _init_tables(cursor)
@@ -706,7 +711,7 @@ def reextract_all_keywords():
                 current_batch.clear()
 
             with db_lock:
-                conn = connect_db(DB_PATH)
+                conn = connect_db(target_db_path)
                 try:
                     cur = conn.cursor()
                     flush_papers_sub(cur)
@@ -739,7 +744,7 @@ def reextract_all_keywords():
 
         # 重新刷新全局 IDF 缓存
         with db_lock:
-            conn = connect_db(DB_PATH)
+            conn = connect_db(target_db_path)
             try:
                 cur = conn.cursor()
                 cur.execute("SELECT COUNT(*) FROM papers")

@@ -2,17 +2,13 @@ import os
 import re
 import json
 import math
-import threading
 from datetime import datetime, timedelta
-from typing import List, Optional
-from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
 from app.auth import verify_token
 from server_modules.database import connect_db
 from server_modules.processor import scan_and_process_files
 import server_modules.processor as processor
 from server_modules.analytics import community_detection
-from ai.keyword_filter import filter_meaningless_keywords
 import app.config as config
 
 router = APIRouter()
@@ -239,7 +235,6 @@ def get_db_path():
     if config.DB_PATH != "data/statistics.db":
         return config.DB_PATH
     import server
-    import server_modules.processor as processor
     if hasattr(server, "DB_PATH") and getattr(server, "DB_PATH") != "data/statistics.db":
         return getattr(server, "DB_PATH")
     if hasattr(processor, "DB_PATH") and getattr(processor, "DB_PATH") != "data/statistics.db":
@@ -325,6 +320,17 @@ def get_keyword_stats(
         if time.time() < exp:
             return res
         
+    try:
+        result = query_keyword_stats(db_path, start_date, end_date, lang, category)
+        if not IS_TESTING:
+            stats_cache[cache_key] = (result, time.time() + 300)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+
+
+def query_keyword_stats(db_path, start_date, end_date, lang="en", category="All"):
+    """Query keyword statistics without HTTP, scanning or process-local caching."""
     conn = connect_db(db_path)
     try:
         cursor = conn.cursor()
@@ -422,15 +428,10 @@ def get_keyword_stats(
             "keywords": keywords_list,
             "daily_trends": daily_trends
         }
-        if not IS_TESTING:
-            stats_cache[cache_key] = (result, time.time() + 300)
         return result
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
     finally:
         conn.close()
+
 
 @router.get("/api/stats/network")
 def get_network_stats(
@@ -691,53 +692,3 @@ def get_hot_papers(journal: str, period: int, token: str = Depends(verify_token)
         raise HTTPException(status_code=500, detail=f"Failed to fetch hot papers: {str(e)}")
     finally:
         conn.close()
-
-
-class AIKeywordFilterRequest(BaseModel):
-    keywords: List[str] = Field(default_factory=list, description="List of candidate keywords to filter")
-    category: str = Field("All", description="Paper category context")
-    model_name: Optional[str] = Field(None, description="Optional LLM model name")
-
-
-@router.post("/api/stats/keywords/ai-filter")
-def ai_filter_keywords(
-    request: AIKeywordFilterRequest,
-    token: str = Depends(verify_token)
-):
-    try:
-        excluded = filter_meaningless_keywords(
-            keywords=request.keywords,
-            category=request.category,
-            model_name=request.model_name
-        )
-        return {
-            "status": "success",
-            "excluded_keywords": excluded,
-            "total_checked": len(request.keywords),
-            "excluded_count": len(excluded)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI Keyword Filtering failed: {str(e)}")
-
-
-@router.post("/api/stats/reextract-keywords")
-def trigger_reextract_keywords(token: str = Depends(verify_token)):
-    status = processor.get_reextract_status()
-    if status.get("status") == "running":
-        return {
-            "status": "running",
-            "message": "重新提取任务正在进行中",
-            "details": status
-        }
-        
-    thread = threading.Thread(target=processor.reextract_all_keywords, daemon=True)
-    thread.start()
-    return {
-        "status": "started",
-        "message": "已启动重新提取关键词任务"
-    }
-
-
-@router.get("/api/stats/reextract-status")
-def get_reextract_status(token: str = Depends(verify_token)):
-    return processor.get_reextract_status()
