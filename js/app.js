@@ -445,23 +445,10 @@ function initEventListeners() {
   
   document.querySelector('.paper-modal').addEventListener('click', (event) => {
     const modal = document.querySelector('.paper-modal');
-    const pdfContainer = modal.querySelector('.pdf-container');
-    
+
     // 如果点击的是模态框背景
     if (event.target === modal) {
-      // 检查PDF是否处于放大状态
-      if (pdfContainer && pdfContainer.classList.contains('expanded')) {
-        // 如果PDF是放大的，先将其恢复正常大小
-        const expandButton = modal.querySelector('.pdf-expand-btn');
-        if (expandButton) {
-          togglePdfSize(expandButton);
-        }
-        // 阻止事件继续传播，防止关闭整个模态框
-        event.stopPropagation();
-      } else {
-        // 如果PDF不是放大状态，则关闭整个模态框
-        closeModal();
-      }
+      closeModal();
     }
   });
   
@@ -1465,23 +1452,6 @@ function showPaperDetails(paper, paperIndex) {
       
       ${paper.abstract_zh ? `<h3>中文摘要 / Chinese Abstract</h3><p class="abstract-zh-text">${highlightedAbstractZh}</p>` : ''}
       ${highlightedAbstract ? `<h3>英文摘要 / English Abstract</h3><p class="original-abstract">${highlightedAbstract}</p>` : ''}
-      
-      <div class="pdf-preview-section">
-        <div class="pdf-header">
-          <h3>PDF Preview</h3>
-          <button class="pdf-expand-btn" onclick="togglePdfSize(this)">
-            <svg class="expand-icon" viewBox="0 0 24 24" width="24" height="24">
-              <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
-            </svg>
-            <svg class="collapse-icon" viewBox="0 0 24 24" width="24" height="24" style="display: none;">
-              <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
-            </svg>
-          </button>
-        </div>
-        <div class="pdf-container">
-          <iframe src="${paper.url.replace('abs', 'pdf')}" width="100%" height="800px" frameborder="0"></iframe>
-        </div>
-      </div>
     </div>
   `;
   
@@ -1852,42 +1822,4 @@ function clearAllAuthors() {
   renderFilterTags();
   // 重新渲染论文列表，移除作者匹配的高亮和优先排序
   renderPapers();
-}
-
-// 切换PDF预览器大小
-function togglePdfSize(button) {
-  const pdfContainer = button.closest('.pdf-preview-section').querySelector('.pdf-container');
-  const iframe = pdfContainer.querySelector('iframe');
-  const expandIcon = button.querySelector('.expand-icon');
-  const collapseIcon = button.querySelector('.collapse-icon');
-  
-  if (pdfContainer.classList.contains('expanded')) {
-    // 恢复正常大小
-    pdfContainer.classList.remove('expanded');
-    iframe.style.height = '800px';
-    expandIcon.style.display = 'block';
-    collapseIcon.style.display = 'none';
-    
-    // 移除遮罩层
-    const overlay = document.querySelector('.pdf-overlay');
-    if (overlay) {
-      overlay.remove();
-    }
-  } else {
-    // 放大显示
-    pdfContainer.classList.add('expanded');
-    iframe.style.height = '90vh';
-    expandIcon.style.display = 'none';
-    collapseIcon.style.display = 'block';
-    
-    // 添加遮罩层
-    const overlay = document.createElement('div');
-    overlay.className = 'pdf-overlay';
-    document.body.appendChild(overlay);
-    
-    // 点击遮罩层时收起PDF
-    overlay.addEventListener('click', () => {
-      togglePdfSize(button);
-    });
-  }
 }
