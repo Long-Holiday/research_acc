@@ -37,4 +37,7 @@ data/*
 
 # Server logs and runtime process files
 server.log
+cron_crawl.log
+cron_fix_abstracts.log
+cron_log_cleanup.log
 .server.pid

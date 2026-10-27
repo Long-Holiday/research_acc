@@ -12,7 +12,8 @@ PID_FILE=".server.pid"
 # 获取脚本所在目录，确保在项目根目录下执行
 # Get the directory of this script, ensure execution in the project root
 # 获取项目的绝对路径
-PROJECT_DIR="$(pwd)"
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_DIR" || exit 1
 
 # 限制底层科学计算库单线程，防止多核抢占导致小内存云主机 CPU 100% 假死
 export OMP_NUM_THREADS=1
@@ -30,6 +31,10 @@ CRON_LINE_CRAWL="$CRON_SCHEDULE_CRAWL export PATH=\$HOME/.local/bin:/usr/local/b
 CRON_SCHEDULE_FIX="0 18 * * 0"
 CRON_IDENTIFIER_FIX="PROJECT_IDENTIFIER=daily_paper_fix_abstracts"
 CRON_LINE_FIX="$CRON_SCHEDULE_FIX export PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin && cd $PROJECT_DIR && $CRON_IDENTIFIER_FIX ./run_fix_abstracts.sh >> $PROJECT_DIR/cron_fix_abstracts.log 2>&1"
+
+# 3. 每小时限制根目录运行日志大小，不触碰 data/。
+CRON_IDENTIFIER_LOGS="PROJECT_IDENTIFIER=daily_paper_log_cleanup"
+CRON_LINE_LOGS="17 * * * * export PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin && cd \"$PROJECT_DIR\" && $CRON_IDENTIFIER_LOGS bash ./run_maintenance.sh logs-cleanup >> \"$PROJECT_DIR/cron_log_cleanup.log\" 2>&1"
 
 # 定时任务辅助函数
 add_cron() {
@@ -50,6 +55,17 @@ add_cron() {
         (crontab -l 2>/dev/null; echo "$CRON_LINE_FIX") | crontab -
         echo "✅ 期刊论文补录与摘要修复定时任务已成功添加到系统 crontab 中 (每周日 18:00 自动执行，先补全所有期刊缺失论文，再补全摘要)。"
     fi
+
+    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_LOGS" >/dev/null; then
+        echo "日志清理定时任务 (每小时 :17) 已配置，无需重复添加。"
+    else
+        if (crontab -l 2>/dev/null; echo "$CRON_LINE_LOGS") | crontab -; then
+            echo "✅ 日志清理定时任务已添加 (每小时 :17，单个日志保留末尾 10 MiB，不清理 data/)。"
+        else
+            echo "日志清理定时任务添加失败，请检查 crontab。" >&2
+            return 1
+        fi
+    fi
 }
 
 remove_cron() {
@@ -62,6 +78,11 @@ remove_cron() {
     if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_FIX" >/dev/null; then
         crontab -l 2>/dev/null | grep -v -F "$CRON_IDENTIFIER_FIX" | crontab -
         echo "摘要修复定时任务已从系统 crontab 中移除。"
+        modified=true
+    fi
+    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_LOGS" >/dev/null; then
+        crontab -l 2>/dev/null | grep -v -F "$CRON_IDENTIFIER_LOGS" | crontab -
+        echo "日志清理定时任务已从系统 crontab 中移除。"
         modified=true
     fi
     if [ "$modified" = "false" ]; then
@@ -87,6 +108,13 @@ check_cron_status() {
         echo "   $expr2"
     else
         echo "2. 期刊论文补录与摘要修复任务: [已禁用]"
+    fi
+
+    if crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_LOGS" >/dev/null; then
+        echo "3. 日志清理任务: [已启用]"
+        crontab -l 2>/dev/null | grep -F "$CRON_IDENTIFIER_LOGS"
+    else
+        echo "3. 日志清理任务: [已禁用]"
     fi
 }
 
@@ -164,7 +192,7 @@ start() {
     echo "运行命令: $RUN_CMD"
     
     # 后台启动并记录 PID
-    nohup $RUN_CMD > "$LOG_FILE" 2>&1 &
+    nohup $RUN_CMD >> "$LOG_FILE" 2>&1 &
     PID=$!
     echo $PID > "$PID_FILE"
     

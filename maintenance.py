@@ -20,6 +20,16 @@ def valid_date(value):
     return value
 
 
+def positive_int(value):
+    try:
+        number = int(value)
+        if number > 0:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("必须为正整数")
+
+
 def add_paths(parser, data=False):
     if data:
         parser.add_argument("--data-dir", default=str(PROJECT_DIR / "data"))
@@ -54,6 +64,9 @@ def build_parser():
     filtering.add_argument("--category", default="All", help="All 或逗号分隔的分类")
     filtering.add_argument("--model-name")
     filtering.add_argument("--keywords-file", help="JSON 字符串数组文件；- 表示 stdin")
+    logs = commands.add_parser("logs-cleanup", help="清理过期日志并限制单个日志大小")
+    logs.add_argument("--max-size-mb", type=positive_int, default=10, help="单个日志保留末尾 MiB（默认 10）")
+    logs.add_argument("--dry-run", action="store_true", help="仅预览，不修改日志")
     return parser
 
 
@@ -143,6 +156,19 @@ def main(argv=None):
             parser.error("数据库过滤需要 --start-date 和 --end-date")
         elif args.start_date > args.end_date:
             parser.error("开始日期不能晚于结束日期")
+
+    if args.command == "logs-cleanup":
+        from server_modules.log_cleanup import cleanup_logs
+
+        try:
+            results = cleanup_logs(
+                PROJECT_DIR, max_bytes=args.max_size_mb * 1024 * 1024, dry_run=args.dry_run,
+            )
+        except OSError as exc:
+            print(f"日志清理失败：{exc}", file=sys.stderr)
+            return 1
+        print(json.dumps({"dry_run": args.dry_run, "files": results}, ensure_ascii=False))
+        return 1 if any(item["action"] == "error" for item in results) else 0
 
     from dotenv import load_dotenv
     load_dotenv(PROJECT_DIR / ".env")

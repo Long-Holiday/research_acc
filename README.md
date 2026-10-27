@@ -20,6 +20,33 @@ bash run_maintenance.sh data-process --data-dir /path/to/data --db-path /path/to
 
 首次处理会为旧库补齐文件变更记录，可能重新提取历史增强文件的关键词，建议在维护时段执行；后续只处理新增或修改的文件。不要同时运行多个写入/重建任务。
 
+## 日志定时清理
+
+`startup.sh start` 启动成功后会注册日志清理 cron，每小时服务器本地时间 **:17** 执行一次。旧版服务使用非追加方式打开 `server.log`，**首次升级请用 `bash startup.sh restart` 重启一次**，切换到追加写入，避免截断后产生稀疏空洞；之后可用 `bash startup.sh cron-add` 注册，无需重启；`cron-status` 查看状态，`cron-remove` 或 `stop` 会移除项目的定时任务（包含原有爬取、修复任务）。需要系统安装并运行 cron。
+
+- **不扫描、不删除、不修改 `data/` 下的任何文件，包括日志、论文和数据库。**
+- 仅处理根目录白名单：`server.log`、`cron_crawl.log`、`cron_fix_abstracts.log`、`cron_log_cleanup.log`。
+- 单个日志超过 **10 MiB** 时，原地保留末尾 10 MiB；未超限的不动，不生成额外归档。保留原 inode，服务日志改为追加写入，清理后运行中的进程可继续输出，无需重启。
+- 每小时检查而非实时限额，两次检查之间日志仍可能超过阈值。原地复制截断与并发写入之间有小窗口，可能丢失少量日志；末尾内容也可能从半行开始，不适合审计日志。
+- 符号链接不跟随，单个文件失败会继续检查其他日志并返回退出码 `1`。清理命令不加载 Web、模型或数据库模块。
+
+```bash
+# 预览，不修改任何日志
+bash run_maintenance.sh logs-cleanup --dry-run
+
+# 手动清理（默认保留末尾 10 MiB）
+bash run_maintenance.sh logs-cleanup
+
+# 自定义单个日志保留大小（正整数，单位 MiB）
+bash run_maintenance.sh logs-cleanup --max-size-mb 20
+
+# 为已有部署注册定时任务；重复执行不会重复添加
+bash startup.sh cron-add
+bash startup.sh cron-status
+```
+
+以上是配置和使用方式；升级代码本身不会立即清理现有日志或修改系统 crontab。
+
 ## 独立维护命令
 
 Advisor 页面的“历史补漏”“重新生成”，以及 Statistics 页面的“重新提取关键词”“AI 智能过滤”已迁移到命令行。页面保留报告阅读、日期选择、主题设置、统计展示及手动关键词排除；维护操作不再提供 Web API。
