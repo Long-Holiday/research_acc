@@ -230,6 +230,34 @@ def test_parse_ideas_json_repairs_legacy_value():
     assert len(ideas) == 1
     assert ideas[0]["title"] == "历史方案"
 
+def test_generate_report_without_research_ideas(tmp_path):
+    date_str = "2026-08-08"
+    (tmp_path / f"{date_str}.jsonl").write_text(
+        json.dumps({"id": "paper-1", "title": "Paper", "summary": "Abstract"}) + "\n",
+        encoding="utf-8",
+    )
+    markdown = "## 1. 今日前沿速递与导师研判\n前沿分析\n\n## 2. 时序演进对比\n趋势分析"
+    with patch("ai.advisor.init_llm"), patch(
+        "ai.advisor.generate_stage1_trend_analysis", return_value=(markdown, "摘要")
+    ), patch("ai.advisor.generate_stage2_ideas") as stage2:
+        report = generate_advisor_report(
+            date_str, topic=DEFAULT_TOPIC, data_dir=str(tmp_path), db_path=TEST_DB
+        )
+
+    stage2.assert_not_called()
+    assert report["report_markdown"] == markdown
+    assert report["ideas_json"] == []
+    conn = connect_db(TEST_DB)
+    try:
+        row = conn.execute(
+            "SELECT report_markdown, ideas_json FROM advisor_reports WHERE report_date = ?",
+            (date_str,),
+        ).fetchone()
+        assert row == (markdown, "[]")
+    finally:
+        conn.close()
+
+
 def test_get_unprocessed_dates(tmp_path):
     # Create mock data files
     (tmp_path / "2026-07-10.jsonl").write_text("{}\n")

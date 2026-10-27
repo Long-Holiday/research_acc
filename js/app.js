@@ -1440,10 +1440,6 @@ function showPaperDetails(paper, paperIndex) {
     ? highlightMatches(paper.conclusion, modalTitleTerms, 'keyword-highlight') 
     : paper.conclusion;
   
-  const highlightedRemoteSensingCross = paper.remote_sensing_cross && modalTitleTerms.length > 0 
-    ? highlightMatches(paper.remote_sensing_cross, modalTitleTerms, 'keyword-highlight') 
-    : paper.remote_sensing_cross;
-  
   const highlightedAbstractZh = paper.abstract_zh && modalTitleTerms.length > 0 
     ? highlightMatches(paper.abstract_zh, modalTitleTerms, 'keyword-highlight') 
     : paper.abstract_zh;
@@ -1465,7 +1461,6 @@ function showPaperDetails(paper, paperIndex) {
         ${paper.method ? `<div class="paper-section"><h4>Method</h4><p>${highlightedMethod}</p></div>` : ''}
         ${paper.result ? `<div class="paper-section"><h4>Result</h4><p>${highlightedResult}</p></div>` : ''}
         ${paper.conclusion ? `<div class="paper-section"><h4>Conclusion</h4><p>${highlightedConclusion}</p></div>` : ''}
-        ${paper.remote_sensing_cross ? `<div class="paper-section"><h4>与遥感交叉或改进方案</h4><p>${highlightedRemoteSensingCross}</p></div>` : ''}
       </div>
       
       ${paper.abstract_zh ? `<h3>中文摘要 / Chinese Abstract</h3><p class="abstract-zh-text">${highlightedAbstractZh}</p>` : ''}

@@ -131,8 +131,7 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         "motivation": "缺失摘要" if missing_abstract else "Motivation analysis unavailable",
         "method": "缺失摘要" if missing_abstract else "Method extraction failed",
         "result": "缺失摘要" if missing_abstract else "Result analysis unavailable",
-        "conclusion": "缺失摘要" if missing_abstract else "Conclusion extraction failed",
-        "remote_sensing_cross": "缺失摘要" if missing_abstract else "Remote sensing cross-disciplinary scheme unavailable"
+        "conclusion": "缺失摘要" if missing_abstract else "Conclusion extraction failed"
     }
 
     inputs = {
@@ -155,6 +154,8 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         print(f"Unexpected error for {item.get('id', 'unknown')}: {e}", file=sys.stderr)
         partial_data = repair_and_extract_json(error_msg)
         item['AI'] = {**default_ai_fields, **partial_data}
+
+    item['AI'].pop('remote_sensing_cross', None)
 
     # Final validation to ensure all required fields exist
     for field in default_ai_fields.keys():

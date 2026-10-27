@@ -20,41 +20,18 @@ def test_structure_translated_title():
     obj = Structure(**data)
     assert obj.translated_title == "翻译后的标题"
 
-def test_validate_remote_sensing_cross_standard():
-    # Standard format with various prefixes
-    res1 = Structure.validate_remote_sensing_cross("交叉/改进可行性：95%。具体方案内容")
-    assert res1 == "交叉/改进可行性：95%。具体方案内容"
-
-    res2 = Structure.validate_remote_sensing_cross("交叉可行性：85%。具体方案")
-    assert res2 == "交叉/改进可行性：85%。具体方案"
-
-    res3 = Structure.validate_remote_sensing_cross("改进可行性：90%。具体方案")
-    assert res3 == "交叉/改进可行性：90%。具体方案"
-
-def test_validate_remote_sensing_cross_multiline():
-    # Multi-line format
-    input_val = "交叉/改进可行性：95%。\n第一行方案内容\n第二行方案内容"
-    res = Structure.validate_remote_sensing_cross(input_val)
-    assert res == "交叉/改进可行性：95%。\n第一行方案内容\n第二行方案内容"
-
-def test_validate_remote_sensing_cross_spaces():
-    # Spaces in prefix
-    res = Structure.validate_remote_sensing_cross("交叉/改进可行性  :  95  %  .   具体方案内容")
-    assert res == "交叉/改进可行性：95%。具体方案内容"
-
-def test_validate_remote_sensing_cross_invalid_prefix_with_percentage():
-    # Invalid prefix but having percentage
-    res1 = Structure.validate_remote_sensing_cross("该方案具有 85% 的可行性，需要进一步优化。")
-    assert res1 == "交叉/改进可行性：85%。该方案具有 85% 的可行性，需要进一步优化。"
-    
-    # Prefix not matching at start but percentage exists
-    res2 = Structure.validate_remote_sensing_cross("一些前导文字 交叉可行性：85%。方案内容")
-    assert res2 == "交叉/改进可行性：85%。一些前导文字 交叉可行性：85%。方案内容"
-
-def test_validate_remote_sensing_cross_fallback():
-    # Default fallback when no percentage is provided
-    res = Structure.validate_remote_sensing_cross("这是一个完全没有百分比的改进方案内容。")
-    assert res == "交叉/改进可行性：70%。这是一个完全没有百分比的改进方案内容。"
+def test_structure_omits_retired_cross_scheme():
+    data = {
+        "translated_title": "标题",
+        "tldr": "摘要",
+        "motivation": "动机",
+        "method": "方法",
+        "result": "结果",
+        "conclusion": "结论",
+    }
+    assert Structure(**data).model_dump() == data
+    assert "remote_sensing_cross" not in Structure.model_json_schema()["properties"]
+    assert Structure(**data, remote_sensing_cross="历史方案").model_dump() == data
 
 from ai.enhance import process_single_item, repair_and_extract_json
 import langchain_core.exceptions
@@ -113,17 +90,13 @@ def test_process_single_item_parser_error_repaired():
     assert "AI" in res
     assert res["AI"]["translated_title"] == "修复标题"
     assert "alpha" in res["AI"]["tldr"]
+    assert "remote_sensing_cross" not in res["AI"]
 
 def test_repair_and_extract_json():
     bad_str = r'{"translated_title": "标题", "tldr": "含有 \frac{1}{2} 公式", "motivation": "动机", "method": "方法", "result": "结果", "conclusion": "结论", "remote_sensing_cross": "交叉/改进可行性：90%。方案"}'
     parsed = repair_and_extract_json(bad_str)
     assert parsed["translated_title"] == "标题"
     assert "frac" in parsed["tldr"]
-
-
-def test_validate_remote_sensing_cross_missing_abstract():
-    assert Structure.validate_remote_sensing_cross("缺失摘要") == "缺失摘要"
-    assert Structure.validate_remote_sensing_cross("  缺失摘要  ") == "缺失摘要"
 
 
 def test_structure_with_missing_abstract_fields():
@@ -139,7 +112,7 @@ def test_structure_with_missing_abstract_fields():
     s = Structure(**data)
     assert s.translated_title == "遥感图像变化检测新方法"
     assert s.tldr == "缺失摘要"
-    assert s.remote_sensing_cross == "缺失摘要"
+    assert "remote_sensing_cross" not in s.model_dump()
 
 
 def test_process_single_item_empty_abstract():
@@ -168,6 +141,6 @@ def test_process_single_item_empty_abstract():
     assert res["AI"]["method"] == "缺失摘要"
     assert res["AI"]["result"] == "缺失摘要"
     assert res["AI"]["conclusion"] == "缺失摘要"
-    assert res["AI"]["remote_sensing_cross"] == "缺失摘要"
+    assert "remote_sensing_cross" not in res["AI"]
 
 

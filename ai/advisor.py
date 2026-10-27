@@ -139,7 +139,6 @@ def load_raw_papers_compact(filepath: str, max_papers: int = 60) -> str:
             # Build structured info from AI fields
             motivation = (ai_info.get("motivation") or "").strip()
             method = (ai_info.get("method") or "").strip()
-            cross_potential = (ai_info.get("remote_sensing_cross") or "").strip()
             translated_title = (ai_info.get("translated_title") or "").strip()
             
             entry = f"[{i}] Title: {title}"
@@ -151,8 +150,6 @@ def load_raw_papers_compact(filepath: str, max_papers: int = 60) -> str:
                 entry += f"\n    Motivation: {motivation}"
             if method:
                 entry += f"\n    Method: {method}"
-            if cross_potential:
-                entry += f"\n    CrossPotential: {cross_potential}"
             
             formatted_list.append(entry)
 
@@ -470,16 +467,8 @@ def generate_advisor_report(
         llm=llm
     )
 
-    # Stage 2 execution
-    part3_markdown, ideas_json = generate_stage2_ideas(
-        date_str=date_str,
-        topic=topic,
-        stage1_analysis=part1_2,
-        papers_text=papers_text,
-        llm=llm
-    )
-
-    full_markdown = f"{part1_2}\n\n{part3_markdown}"
+    full_markdown = part1_2
+    ideas_json = []
 
     # Save to SQLite
     conn = connect_db(db_path)

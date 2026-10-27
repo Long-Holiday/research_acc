@@ -150,39 +150,24 @@ const AdvisorApp = {
 
     renderReport(report) {
         report = report && typeof report === 'object' ? report : {};
-        const fullMd = report.report_markdown || '';
+        // 历史研报可能包含已停用的第三部分，渲染前截去。
+        const sec3Regex = /(?:^|\n)(#{1,3}\s*(?:3[\.、\s].*|[3三]篇.*|科研选题.*|.*梯队化科研选题.*)|#{1,3}\s*思路1.*)(?:\n|$)/i;
+        const fullMd = (report.report_markdown || '').split(sec3Regex)[0];
         
         let part1 = '';
         let part2 = '';
-        let part3 = '';
 
         // Match Section 2 header: ## 2. 时序演进对比...
         const sec2Regex = /(?:^|\n)(#{1,3}\s*2[\.、\s].*时序演进.*)(?:\n|$)/i;
-        // Match Section 3 header: ## 3. 3篇梯队化... or # 三篇梯队化... or # 3篇梯队化... or ### 思路1...
-        const sec3Regex = /(?:^|\n)(#{1,3}\s*(?:3[\.、\s].*|[3三]篇.*|科研选题.*|.*梯队化科研选题.*)|#{1,3}\s*思路1.*)(?:\n|$)/i;
-
         const match2 = fullMd.match(sec2Regex);
-        const match3 = fullMd.match(sec3Regex);
-
         const idx2 = match2 ? match2.index + (match2[0].startsWith('\n') ? 1 : 0) : -1;
-        const idx3 = match3 ? match3.index + (match3[0].startsWith('\n') ? 1 : 0) : -1;
 
-        if (idx2 !== -1 && idx3 !== -1 && idx2 < idx3) {
-            part1 = fullMd.substring(0, idx2).trim();
-            part2 = fullMd.substring(idx2, idx3).trim();
-            part3 = fullMd.substring(idx3).trim();
-        } else if (idx2 !== -1) {
+        if (idx2 !== -1) {
             part1 = fullMd.substring(0, idx2).trim();
             part2 = fullMd.substring(idx2).trim();
-            part3 = '*暂无独立的选题与实验设计方案*';
-        } else if (idx3 !== -1) {
-            part1 = fullMd.substring(0, idx3).trim();
-            part2 = '*暂无过去7天与30天的历史研报数据对比*';
-            part3 = fullMd.substring(idx3).trim();
         } else {
             part1 = fullMd;
             part2 = '*暂无过去7天与30天的历史研报数据对比*';
-            part3 = '*暂无独立的选题与实验设计方案*';
         }
 
         // Remove redundant markdown headers that duplicate HTML card titles
@@ -191,26 +176,13 @@ const AdvisorApp = {
         
         part2 = part2.replace(/^#{1,3}\s*2[\.、\s][^\n]+\n*/, '').trim();
         
-        part3 = part3.replace(/^#{1,3}\s*(?:3[\.、\s][^\n]*|[3三]篇[^\n]*|科研选题[^\n]*|.*梯队化科研选题[^\n]*)\n*/i, '').trim();
-
         const el1 = document.getElementById('part1Content');
         const el2 = document.getElementById('part2Content');
-        const el3 = document.getElementById('part3Content');
 
         if (el1) el1.innerHTML = this.renderMarkdown(part1);
         if (el2) el2.innerHTML = this.renderMarkdown(part2);
-        
-        const ideas = Array.isArray(report.ideas_json) ? report.ideas_json : [];
-        if (ideas.length > 0) {
-            if (el3) {
-                el3.innerHTML = this.renderIdeasTabs(ideas);
-                this.bindIdeaTabsAndCopy(el3, ideas);
-            }
-        } else {
-            if (el3) el3.innerHTML = this.renderMarkdown(part3);
-        }
 
-        this.postProcessContainers([el1, el2, el3]);
+        this.postProcessContainers([el1, el2]);
     },
 
     renderIdeasTabs(ideas) {
