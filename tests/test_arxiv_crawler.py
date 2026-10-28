@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from scrapy.exceptions import DropItem
 from scrapy.http import HtmlResponse, Request
 from daily_paper.daily_arxiv.spiders.arxiv import ArxivSpider
 from daily_paper.daily_arxiv.pipelines import DailyArxivPipeline
@@ -112,29 +112,59 @@ def test_arxiv_pipeline_no_api_when_complete():
         "abs": "https://arxiv.org/abs/2609.12078"
     }
     
-    # 模拟 client.results，若被调用则抛异常以验证零 API 调用
-    with patch.object(pipeline.client, "results", side_effect=AssertionError("Should not call arXiv API")):
-        result = pipeline.process_item(item, spider)
-        assert result["title"] == "Existing Title"
-        assert result["summary"] == "Existing Summary"
+    assert pipeline.process_item(item, spider) is item
 
 
-def test_arxiv_pipeline_fallback_handles_429():
-    pipeline = DailyArxivPipeline()
+@pytest.mark.parametrize("field", ["title", "summary"])
+@pytest.mark.parametrize("value", [None, ""])
+def test_arxiv_pipeline_drops_incomplete_papers(field, value):
+    item = {"id": "2609.99999", "title": "Title", "summary": "Summary"}
+    if value is None:
+        del item[field]
+    else:
+        item[field] = value
+
+    with pytest.raises(DropItem, match=field):
+        DailyArxivPipeline().process_item(item, ArxivSpider())
+
+
+def test_arxiv_spider_categories_from_environment(monkeypatch):
+    monkeypatch.setenv("CATEGORIES", " cs.CV, ,cs.CL,cs.CV ")
     spider = ArxivSpider()
-    
-    item = {
-        "id": "2609.99999",
-        "title": "",  # 缺少标题和摘要
-        "summary": "",
-    }
-    
-    # 模拟 API 抛出异常（如 429）
-    with patch.object(pipeline.client, "results", side_effect=Exception("HTTP 429 Too Many Requests")):
-        result = pipeline.process_item(item, spider)
-        # 应被捕获并赋予默认安全值，而不是直接崩溃
-        assert result["id"] == "2609.99999"
-        assert result["pdf"] == "https://arxiv.org/pdf/2609.99999"
-        assert result["abs"] == "https://arxiv.org/abs/2609.99999"
-        assert isinstance(result["authors"], list)
-        assert isinstance(result["summary"], str)
+    assert spider.target_categories == {"cs.CV", "cs.CL"}
+    assert spider.start_urls == [
+        "https://arxiv.org/list/cs.CL/new",
+        "https://arxiv.org/list/cs.CV/new",
+    ]
+
+
+def test_arxiv_spider_without_replacements():
+    html = SAMPLE_ARXIV_HTML.replace(
+        '<li><a href="#item3">Replacements</a></li>', ""
+    )
+    response = HtmlResponse(url="https://arxiv.org/list/cs.CV/new", body=html.encode())
+    spider = ArxivSpider()
+    spider.target_categories = {"cs.CV"}
+    assert len(list(spider.parse(response))) == 3
+
+
+def test_arxiv_spider_filters_other_categories():
+    response = HtmlResponse(
+        url="https://arxiv.org/list/cs.CL/new", body=SAMPLE_ARXIV_HTML.encode()
+    )
+    spider = ArxivSpider()
+    spider.target_categories = {"cs.CL"}
+    assert list(spider.parse(response)) == []
+
+
+def test_arxiv_spider_keeps_nested_abstract_text():
+    html = SAMPLE_ARXIV_HTML.replace(
+        "This is an extensive abstract describing vision tasks.",
+        "Abstract: This is an <em>extensive</em> abstract describing vision tasks.",
+    )
+    response = HtmlResponse(url="https://arxiv.org/list/cs.CV/new", body=html.encode())
+    spider = ArxivSpider()
+    spider.target_categories = {"cs.CV"}
+    assert list(spider.parse(response))[0]["summary"] == (
+        "This is an extensive abstract describing vision tasks."
+    )
