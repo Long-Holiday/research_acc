@@ -53,7 +53,7 @@ def build_parser():
     regenerate.add_argument("--date", type=valid_date, required=True)
     regenerate.add_argument("--topic")
 
-    reextract = commands.add_parser("keywords-reextract", help="全量重建关键词索引与统计")
+    reextract = commands.add_parser("keywords-reextract", help="从 AI.keywords 全量重建关键词索引与统计，不补提取历史数据")
     add_paths(reextract, data=True)
 
     filtering = commands.add_parser("keywords-filter", help="输出 AI/规则建议排除的关键词 JSON")

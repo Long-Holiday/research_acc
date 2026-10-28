@@ -8,3 +8,4 @@ class Structure(BaseModel):
     method: str = Field(description="method of this paper. If abstract is empty/missing, fill '缺失摘要'")
     result: str = Field(description="result of this paper. If abstract is empty/missing, fill '缺失摘要'")
     conclusion: str = Field(description="conclusion of this paper. If abstract is empty/missing, fill '缺失摘要'")
+    keywords: list[str] = Field(description="Extract 3-8 specific academic keywords from the title and abstract, always in English regardless of target language. Use standard terms, singular forms, and consistent names for the same concept; avoid generic words and duplicates. If abstract is empty/missing, return an empty list.")

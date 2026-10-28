@@ -132,47 +132,21 @@ else
     fi
 fi
 
-# 检查并安装依赖和模型
-# Check and install dependencies and models
+# 检查并安装依赖
+# Check and install dependencies
 install_dependencies() {
-    echo "正在检查并安装项目依赖及 spaCy 模型..."
+    echo "正在检查并安装项目依赖..."
     if command -v uv >/dev/null 2>&1; then
         echo "检测到 uv，正在确保依据 pyproject.toml 安装项目依赖..."
         uv pip install -r pyproject.toml
-        if ! uv run python -c "import spacy; spacy.load('en_core_web_sm')" >/dev/null 2>&1; then
-            echo "正在下载 spaCy 模型 en_core_web_sm..."
-            uv run python -m spacy download en_core_web_sm
-        else
-            echo "spaCy 模型 en_core_web_sm 已存在，无需下载。"
-        fi
     elif [ -d ".venv" ]; then
         echo "检测到 .venv，正在安装项目依赖..."
-        if [ -f "pyproject.toml" ]; then
-            .venv/bin/pip install -r pyproject.toml
-        else
-            .venv/bin/pip install spacy
-        fi
-        if ! .venv/bin/python -c "import spacy; spacy.load('en_core_web_sm')" >/dev/null 2>&1; then
-            echo "正在下载 spaCy 模型 en_core_web_sm..."
-            .venv/bin/python -m spacy download en_core_web_sm
-        else
-            echo "spaCy 模型 en_core_web_sm 已存在，无需下载。"
-        fi
+        .venv/bin/pip install -r pyproject.toml
     else
         echo "未检测到虚拟环境，尝试全局/当前 Python 环境安装..."
-        if [ -f "pyproject.toml" ]; then
-            pip install -r pyproject.toml
-        else
-            pip install spacy
-        fi
-        if ! python -c "import spacy; spacy.load('en_core_web_sm')" >/dev/null 2>&1; then
-            echo "正在下载 spaCy 模型 en_core_web_sm..."
-            python -m spacy download en_core_web_sm
-        else
-            echo "spaCy 模型 en_core_web_sm 已存在，无需下载。"
-        fi
+        pip install -r pyproject.toml
     fi
-    echo "依赖及模型检查完成。"
+    echo "依赖检查完成。"
 }
 
 start() {

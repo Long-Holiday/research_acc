@@ -144,14 +144,13 @@ def test_reextract_explicit_paths_preserve_advisor(tmp_path, db_path):
     source_dir = tmp_path / "data with spaces"
     source_dir.mkdir()
     source = source_dir / "2026-08-01_AI_enhanced_Chinese.jsonl"
-    source.write_text(json.dumps({"id": "paper", "title": "Title", "summary": "Summary", "categories": ["cs.CV"]}) + "\n")
+    source.write_text(json.dumps({"id": "paper", "title": "Title", "summary": "Summary", "categories": ["cs.CV"], "AI": {"keywords": ["new keyword"]}}) + "\n")
     conn = connect_db(db_path)
     conn.execute("INSERT INTO advisor_reports (report_date, topic, report_markdown) VALUES (?, ?, ?)",
                  ("2026-08-01", "topic", "report"))
     conn.commit()
     conn.close()
-    with patch.object(processor.keywords, "extract_keywords_batch", return_value=[[("new keyword", 3)]]):
-        assert processor.reextract_all_keywords(data_dir=str(source_dir), db_path=db_path)
+    assert processor.reextract_all_keywords(data_dir=str(source_dir), db_path=db_path)
     conn = connect_db(db_path)
     assert conn.execute("SELECT keyword FROM paper_keywords").fetchall() == [("new keyword",)]
     assert conn.execute("SELECT distinct_paper_count FROM agg_daily_keywords").fetchone() == (1,)

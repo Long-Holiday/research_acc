@@ -19,7 +19,6 @@ dependencies = [
     "uvicorn>=0.28.0",
     "python-dotenv>=1.0.1",
     "pytest>=8.0.0",
-    "spacy>=3.7.0",
     "networkx>=3.6.1",
     "tenacity>=8.2.0",
     "json-repair>=0.62.0",

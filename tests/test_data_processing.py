@@ -14,13 +14,6 @@ def processing_env(tmp_path, monkeypatch):
     data_dir.mkdir()
     db_path = tmp_path / "db/statistics.db"
     processor.processed_files_cache.clear()
-    monkeypatch.setattr(processor.keywords, "idf_cache", {})
-    monkeypatch.setattr(processor.keywords, "idf_doc_count", 0)
-
-    def extract(items, batch_size=50):
-        return [[(paper["title"].lower(), 3)] for paper in items]
-
-    monkeypatch.setattr(processor.keywords, "extract_keywords_batch", extract)
     return data_dir, db_path
 
 
@@ -28,6 +21,7 @@ def write_papers(data_dir, date="2026-10-12", title="Old", ids=("paper",)):
     path = data_dir / f"{date}_AI_enhanced_Chinese.jsonl"
     path.write_text("".join(json.dumps({
         "id": paper_id, "title": title, "summary": "Summary", "categories": ["cs.CV"],
+        "AI": {"keywords": [title]},
     }) + "\n" for paper_id in ids))
     return path
 
@@ -52,7 +46,7 @@ def test_new_unchanged_and_repaired_files(processing_env):
     write_papers(data_dir, title="Repaired", ids=("paper", "new-paper"))
     assert processor.scan_and_process_files(data_dir, db_path) == 1
     assert all(json.loads(row[3])["title"] == "Repaired" for row in rows(db_path, "papers"))
-    assert [(row[4], row[5]) for row in rows(db_path, "keyword_stats")] == [("repaired", 6)]
+    assert [(row[4], row[5]) for row in rows(db_path, "keyword_stats")] == [("repaired", 2)]
     assert rows(db_path, "agg_daily_papers") == [("2026-10-12", "Chinese", "cs.CV", 2)]
     assert rows(db_path, "agg_daily_keywords") == [("2026-10-12", "Chinese", "cs.CV", "repaired", 2)]
     marker = rows(db_path, "processed_files")[0]
@@ -71,10 +65,10 @@ def test_legacy_database_migration_and_no_double_count(processing_env):
     assert processor.scan_and_process_files(data_dir, db_path) == 1
     assert len(rows(db_path, "processed_files")[0]) == 4
     assert processor.scan_and_process_files(data_dir, db_path) == 0
-    assert rows(db_path, "keyword_stats")[0][5] == 3
+    assert rows(db_path, "keyword_stats")[0][5] == 1
 
 
-@pytest.mark.parametrize("failure", ["nlp", "json", "changed"])
+@pytest.mark.parametrize("failure", ["keywords", "json", "changed"])
 def test_failed_processing_keeps_previous_snapshot(processing_env, failure):
     data_dir, db_path = processing_env
     path = write_papers(data_dir)
@@ -91,13 +85,13 @@ def test_failed_processing_keeps_previous_snapshot(processing_env, failure):
             return [[("new", 3)]]
         context = patch.object(processor.keywords, "extract_keywords_batch", side_effect=change)
     else:
-        context = patch.object(processor.keywords, "extract_keywords_batch", side_effect=RuntimeError("NLP failed"))
+        context = patch.object(processor.keywords, "extract_keywords_batch", side_effect=RuntimeError("Keyword aggregation failed"))
     with context, pytest.raises((RuntimeError, ValueError)):
         processor.scan_and_process_files(data_dir, db_path)
     assert {table: rows(db_path, table) for table in tables} == snapshot
     write_papers(data_dir, title="Recovered")
     assert processor.scan_and_process_files(data_dir, db_path) == 1
-    assert rows(db_path, "keyword_stats")[0][4:] == ("recovered", 3)
+    assert rows(db_path, "keyword_stats")[0][4:] == ("recovered", 1)
 
 
 def test_empty_file_replaces_previous_date(processing_env):
@@ -127,7 +121,7 @@ def test_cross_date_dedup_and_new_history(processing_env):
     ]
 
 
-def test_duplicates_are_skipped_before_nlp_with_bounded_history_queries(processing_env):
+def test_duplicates_are_skipped_before_keyword_aggregation_with_bounded_history_queries(processing_env):
     data_dir, db_path = processing_env
     write_papers(data_dir, date="2026-10-11", ids=("shared",))
     processor.scan_and_process_files(data_dir, db_path)
@@ -156,6 +150,31 @@ def test_duplicates_are_skipped_before_nlp_with_bounded_history_queries(processi
     assert len(rows(db_path, "papers")) == 62
 
 
+def test_ai_keywords_are_counted_once_and_missing_keywords_keep_papers(processing_env):
+    data_dir, db_path = processing_env
+    path = data_dir / "2026-10-12_AI_enhanced_Chinese.jsonl"
+    papers = [
+        {"id": "one", "categories": ["cs.CV"], "AI": {"keywords": [" Remote Sensing ", "remote sensing", "Change Detection"]}, "concepts": ["Ignored concept"]},
+        {"id": "two", "categories": "cs.CV cs.AI", "AI": {"keywords": ["Remote Sensing"]}},
+        {"id": "legacy", "categories": ["cs.CV"], "title": "No extraction", "concepts": ["Ignored concept"]},
+        {"id": "failed", "categories": ["cs.AI"], "AI": {"keywords": []}},
+    ]
+    path.write_text("".join(json.dumps(paper) + "\n" for paper in papers))
+    assert processor.scan_and_process_files(data_dir, db_path) == 1
+    assert len(rows(db_path, "papers")) == 4
+    assert {(row[4], row[5]) for row in rows(db_path, "keyword_stats")} == {
+        ("remote sensing", 2), ("change detection", 1),
+    }
+    assert len(rows(db_path, "paper_keywords")) == 3
+    assert set(rows(db_path, "agg_daily_papers")) == {
+        ("2026-10-12", "Chinese", "cs.CV", 3), ("2026-10-12", "Chinese", "cs.AI", 1),
+    }
+    assert set(rows(db_path, "agg_daily_keywords")) == {
+        ("2026-10-12", "Chinese", "cs.CV", "remote sensing", 2),
+        ("2026-10-12", "Chinese", "cs.CV", "change detection", 1),
+    }
+
+
 def test_data_process_cli_uses_custom_paths(processing_env, capsys):
     data_dir, db_path = processing_env
     write_papers(data_dir)
@@ -170,5 +189,5 @@ def test_data_process_cli_uses_custom_paths(processing_env, capsys):
 def test_data_process_cli_propagates_failure(processing_env):
     data_dir, db_path = processing_env
     write_papers(data_dir)
-    with patch.object(processor.keywords, "extract_keywords_batch", side_effect=RuntimeError("NLP failed")):
+    with patch.object(processor.keywords, "extract_keywords_batch", side_effect=RuntimeError("Keyword aggregation failed")):
         assert maintenance.main(["data-process", "--data-dir", str(data_dir), "--db-path", str(db_path)]) == 1

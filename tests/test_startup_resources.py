@@ -40,5 +40,5 @@ def test_dependency_install_is_explicit(tmp_path):
     assert result.returncode == 0, result.stderr
     commands = trace.read_text().splitlines()
     assert commands[0] == "pip install -r pyproject.toml"
-    assert any("spacy.load" in command for command in commands)
+    assert not any("spacy" in command for command in commands)
     assert not any("uvicorn" in command for command in commands)

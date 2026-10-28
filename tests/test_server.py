@@ -116,7 +116,8 @@ def test_auth_and_data_apis():
             "summary": "This test paper presents a novel computer vision method.",
             "AI": {
                 "translated_title": "测试论文标题",
-                "tldr": "Tldr"
+                "tldr": "Tldr",
+                "keywords": ["Test"]
             }
         }) + "\n")
     
@@ -211,13 +212,15 @@ def test_stats_apis():
             "id": "paper_1",
             "title": "Proactive Context Graphs for Enterprise Agents",
             "summary": "Retrieval-Augmented Generation RAG systems should be proactive enterprise agents.",
-            "categories": ["cs.AI", "cs.LG"]
+            "categories": ["cs.AI", "cs.LG"],
+            "AI": {"keywords": ["Graphs", "Enterprise"]}
         }) + "\n")
         f.write(json.dumps({
             "id": "paper_2",
             "title": "Active Graphs and Enterprise Networks",
             "summary": "We study active context graphs in enterprise networks.",
-            "categories": ["cs.AI"]
+            "categories": ["cs.AI"],
+            "AI": {"keywords": ["Graphs", "Enterprise"]}
         }) + "\n")
         
     try:
@@ -515,23 +518,22 @@ def test_keyword_growth_rate_is_confidence_adjusted():
     test_file_1 = "data/2026-07-08_AI_enhanced_Chinese.jsonl"
     test_file_2 = "data/2026-07-09_AI_enhanced_Chinese.jsonl"
     
-    # We want "noisy" keyword to appear < 5 times total (e.g. 3 times)
-    # We want "frequent" keyword to appear >= 5 times total (e.g. 18 times)
+    # Keywords are counted once per paper: noisy has 3 hits, frequent has 6.
     
     with open(test_file_0, "w", encoding="utf-8") as f:
-        # Frequent appears 1 time on Day 0 (count 3). Noisy does not appear (count 0).
-        f.write(json.dumps({"id": "p0_1", "title": "frequent", "summary": "", "categories": ["cs.AI"]}) + "\n")
+        # Frequent has 1 hit on Day 0; noisy has none.
+        f.write(json.dumps({"id": "p0_1", "title": "frequent", "summary": "", "categories": ["cs.AI"], "AI": {"keywords": ["frequent"]}}) + "\n")
         
     with open(test_file_1, "w", encoding="utf-8") as f:
-        # Frequent appears 2 times on Day 1 (count 6). Noisy appears 1 time in summary (count 1).
-        f.write(json.dumps({"id": "p1_1", "title": "frequent", "summary": "", "categories": ["cs.AI"]}) + "\n")
-        f.write(json.dumps({"id": "p1_2", "title": "frequent", "summary": "noisy", "categories": ["cs.AI"]}) + "\n")
+        # Frequent has 2 hits on Day 1; noisy has 1.
+        f.write(json.dumps({"id": "p1_1", "title": "frequent", "summary": "", "categories": ["cs.AI"], "AI": {"keywords": ["frequent"]}}) + "\n")
+        f.write(json.dumps({"id": "p1_2", "title": "frequent", "summary": "noisy", "categories": ["cs.AI"], "AI": {"keywords": ["frequent", "noisy"]}}) + "\n")
         
     with open(test_file_2, "w", encoding="utf-8") as f:
-        # Frequent appears 3 times on Day 2 (count 9). Noisy appears 2 times in summaries (count 2).
-        f.write(json.dumps({"id": "p2_1", "title": "frequent", "summary": "", "categories": ["cs.AI"]}) + "\n")
-        f.write(json.dumps({"id": "p2_2", "title": "frequent", "summary": "noisy", "categories": ["cs.AI"]}) + "\n")
-        f.write(json.dumps({"id": "p2_3", "title": "frequent", "summary": "noisy", "categories": ["cs.AI"]}) + "\n")
+        # Frequent has 3 hits on Day 2; noisy has 2.
+        f.write(json.dumps({"id": "p2_1", "title": "frequent", "summary": "", "categories": ["cs.AI"], "AI": {"keywords": ["frequent"]}}) + "\n")
+        f.write(json.dumps({"id": "p2_2", "title": "frequent", "summary": "noisy", "categories": ["cs.AI"], "AI": {"keywords": ["frequent", "noisy"]}}) + "\n")
+        f.write(json.dumps({"id": "p2_3", "title": "frequent", "summary": "noisy", "categories": ["cs.AI"], "AI": {"keywords": ["frequent", "noisy"]}}) + "\n")
         
     try:
         # Clear stats database to ensure a clean slate

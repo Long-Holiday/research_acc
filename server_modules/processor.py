@@ -1,7 +1,6 @@
 import os
 import json
 import re
-import math
 import threading
 from typing import Optional, List, Dict, Set, Tuple
 from server_modules.database import connect_db
@@ -115,6 +114,35 @@ def get_db_path():
         return getattr(server, "DB_PATH")
     return DB_PATH
 
+def _refresh_daily_paper_counts(cursor, paper_date, language):
+    """论文总数包含没有 AI 关键词的论文。"""
+    counts = {}
+    cursor.execute(
+        "SELECT paper_json FROM papers WHERE paper_date = ? AND language = ?",
+        (paper_date, language),
+    )
+    for (paper_json,) in cursor:
+        category = _paper_category(json.loads(paper_json))
+        counts[category] = counts.get(category, 0) + 1
+    cursor.execute(
+        "DELETE FROM agg_daily_papers WHERE paper_date = ? AND language = ?",
+        (paper_date, language),
+    )
+    cursor.executemany(
+        "INSERT INTO agg_daily_papers (paper_date, language, category, total_papers) VALUES (?, ?, ?, ?)",
+        [(paper_date, language, category, count) for category, count in counts.items()],
+    )
+
+
+def _paper_category(paper):
+    cats = paper.get("categories", [])
+    if isinstance(cats, list) and cats:
+        return cats[0]
+    if isinstance(cats, str) and cats.strip():
+        return re.split(r"[,\s]+", cats.strip())[0]
+    return "unknown"
+
+
 _scan_lock = threading.Lock()
 
 def clear_processed_cache(filename: Optional[str] = None, clear_db: bool = True):
@@ -180,30 +208,6 @@ def scan_and_process_files(data_dir="data", db_path=None):
                 if not files_to_process:
                     return 0
 
-                # Rebuild/refresh global IDF cache from existing papers using DB aggregate queries
-                try:
-                    cursor.execute("SELECT COUNT(*) FROM papers")
-                    total_papers = cursor.fetchone()[0]
-                    
-                    # 仅当未初始化或论文总数增长超过 10% 时才全表重建 IDF 缓存
-                    need_idf_refresh = not keywords.idf_cache or abs(total_papers - keywords.idf_doc_count) > max(50, keywords.idf_doc_count * 0.1)
-                    keywords.idf_doc_count = total_papers
-                    
-                    if need_idf_refresh and total_papers > 0:
-                        cursor.execute("SELECT keyword, COUNT(DISTINCT paper_id) FROM paper_keywords GROUP BY keyword")
-                        df_rows = cursor.fetchall()
-                        keywords.idf_cache = {
-                            row[0].lower(): math.log((1 + total_papers) / (1 + row[1])) + 1
-                            for row in df_rows if row[0]
-                        }
-                    elif not need_idf_refresh and keywords.idf_cache:
-                        pass
-                    else:
-                        keywords.idf_cache = {}
-                except Exception:
-                    keywords.idf_cache = {}
-                    keywords.idf_doc_count = 0
-                    
                 cursor.execute("BEGIN IMMEDIATE")
                 for filename, paper_date, lang, mtime_ns, file_size in files_to_process:
                     # 同日期/语言整批替换，删除旧聚合，避免修复后关键词频率重复累加。
@@ -217,7 +221,7 @@ def scan_and_process_files(data_dir="data", db_path=None):
                     # 分块缓冲写入，避免一次性在内存中累积整批论文/关键词列表导致 OOM。
                     CHUNK_PAPERS = 500
                     CHUNK_KEYWORDS = 2000
-                    BATCH_NLP_SIZE = 50
+                    BATCH_SIZE = 50
 
                     stats_map = {}
                     paper_keywords_buf = []
@@ -253,7 +257,7 @@ def scan_and_process_files(data_dir="data", db_path=None):
                             """, rows)
                             stats_map.clear()
 
-                    # 逐批读取与批量 NLP 分析
+                    # 逐批读取并汇总 AI 关键词
                     current_batch = []
                     
                     def process_current_batch(batch_items):
@@ -279,7 +283,7 @@ def scan_and_process_files(data_dir="data", db_path=None):
                         if not unique_items:
                             return
 
-                        batch_kws = keywords.extract_keywords_batch(unique_items, batch_size=BATCH_NLP_SIZE)
+                        batch_kws = keywords.extract_keywords_batch(unique_items, batch_size=BATCH_SIZE)
 
                         for paper_item, keywords_with_freq in zip(unique_items, batch_kws):
                             paper_id = paper_item["id"]
@@ -299,13 +303,6 @@ def scan_and_process_files(data_dir="data", db_path=None):
                                 if cats_split and cats_split[0]:
                                     category = cats_split[0]
                                     
-                            # Merge OpenAlex concepts if available
-                            concepts = paper_item.get("concepts", [])
-                            if isinstance(concepts, list):
-                                for concept in concepts:
-                                    if concept and isinstance(concept, str):
-                                        keywords_with_freq.append((concept.lower(), 2))
-
                             # Group same keywords in the same paper to avoid duplicate key violations
                             unique_kws = {}
                             for kw, freq in keywords_with_freq:
@@ -330,7 +327,7 @@ def scan_and_process_files(data_dir="data", db_path=None):
                                 raise ValueError(f"无效论文数据: {filename}")
 
                             current_batch.append(paper)
-                            if len(current_batch) >= BATCH_NLP_SIZE:
+                            if len(current_batch) >= BATCH_SIZE:
                                 process_current_batch(current_batch)
                                 current_batch.clear()
 
@@ -351,13 +348,7 @@ def scan_and_process_files(data_dir="data", db_path=None):
                     )
                     
                     # Incrementally update aggregation tables for the processed date, lang
-                    cursor.execute("""
-                    INSERT OR REPLACE INTO agg_daily_papers (paper_date, language, category, total_papers)
-                    SELECT paper_date, language, category, COUNT(DISTINCT paper_id)
-                    FROM paper_keywords
-                    WHERE paper_date = ? AND language = ?
-                    GROUP BY paper_date, language, category
-                    """, (paper_date, lang))
+                    _refresh_daily_paper_counts(cursor, paper_date, lang)
                     
                     cursor.execute("""
                     INSERT OR REPLACE INTO agg_daily_keywords (paper_date, language, category, keyword, distinct_paper_count)
@@ -386,7 +377,7 @@ def scan_and_process_files(data_dir="data", db_path=None):
 
 
 def reextract_keywords_for_papers(paper_groups):
-    """仅重新提取指定论文的关键词，并增量刷新其日期/语言聚合数据。
+    """仅同步指定论文的 AI 关键词，并增量刷新其日期/语言聚合数据。
 
     ``paper_groups`` 为 ``[(paper_date, language, papers), ...]``。旧论文会先根据
     数据库中保存的旧版本计算并扣除原关键词贡献；新增论文则直接追加，因此无需
@@ -414,10 +405,6 @@ def reextract_keywords_for_papers(paper_groups):
                 category = re.split(r"[,\s]+", cats.strip())[0]
             else:
                 category = "unknown"
-
-            for concept in paper.get("concepts", []):
-                if isinstance(concept, str) and concept:
-                    paper_keywords.append((concept.lower(), 2))
 
             unique = {}
             for keyword, frequency in paper_keywords:
@@ -493,16 +480,7 @@ def reextract_keywords_for_papers(paper_groups):
                     affected_date_languages.add((paper_date, language))
 
                 for paper_date, language in affected_date_languages:
-                    cursor.execute(
-                        "DELETE FROM agg_daily_papers WHERE paper_date = ? AND language = ?",
-                        (paper_date, language),
-                    )
-                    cursor.execute("""
-                        INSERT INTO agg_daily_papers (paper_date, language, category, total_papers)
-                        SELECT paper_date, language, category, COUNT(DISTINCT paper_id)
-                        FROM paper_keywords WHERE paper_date = ? AND language = ?
-                        GROUP BY paper_date, language, category
-                    """, (paper_date, language))
+                    _refresh_daily_paper_counts(cursor, paper_date, language)
                     cursor.execute(
                         "DELETE FROM agg_daily_keywords WHERE paper_date = ? AND language = ?",
                         (paper_date, language),
@@ -596,9 +574,6 @@ def reextract_all_keywords(data_dir="data", db_path=None):
             finally:
                 conn.close()
 
-        keywords.idf_cache = {}
-        keywords.idf_doc_count = 0
-
         # 逐个文件重提取
         for idx, (filename, paper_date, lang) in enumerate(target_files):
             with reextract_lock:
@@ -646,13 +621,13 @@ def reextract_all_keywords(data_dir="data", db_path=None):
                     """, rows)
                     stats_map.clear()
 
-            BATCH_NLP_SIZE = 50
+            BATCH_SIZE = 50
             current_batch = []
             
             def process_reextract_batch(batch_items):
                 if not batch_items:
                     return
-                batch_kws = keywords.extract_keywords_batch(batch_items, batch_size=BATCH_NLP_SIZE)
+                batch_kws = keywords.extract_keywords_batch(batch_items, batch_size=BATCH_SIZE)
                 for paper, keywords_with_freq in zip(batch_items, batch_kws):
                     paper_id = paper.get("id")
                     if not paper_id:
@@ -668,12 +643,6 @@ def reextract_all_keywords(data_dir="data", db_path=None):
                         cats_split = re.split(r"[,\s]+", cats.strip())
                         if cats_split and cats_split[0]:
                             category = cats_split[0]
-
-                    concepts = paper.get("concepts", [])
-                    if isinstance(concepts, list):
-                        for concept in concepts:
-                            if concept and isinstance(concept, str):
-                                keywords_with_freq.append((concept.lower(), 2))
 
                     unique_kws = {}
                     for kw, freq in keywords_with_freq:
@@ -695,7 +664,7 @@ def reextract_all_keywords(data_dir="data", db_path=None):
                         continue
 
                     current_batch.append(paper)
-                    if len(current_batch) >= BATCH_NLP_SIZE:
+                    if len(current_batch) >= BATCH_SIZE:
                         process_reextract_batch(current_batch)
                         current_batch.clear()
 
@@ -713,13 +682,7 @@ def reextract_all_keywords(data_dir="data", db_path=None):
 
                     cur.execute("INSERT OR REPLACE INTO processed_files (filename) VALUES (?)", (filename,))
                     
-                    cur.execute("""
-                    INSERT OR REPLACE INTO agg_daily_papers (paper_date, language, category, total_papers)
-                    SELECT paper_date, language, category, COUNT(DISTINCT paper_id)
-                    FROM paper_keywords
-                    WHERE paper_date = ? AND language = ?
-                    GROUP BY paper_date, language, category
-                    """, (paper_date, lang))
+                    _refresh_daily_paper_counts(cur, paper_date, lang)
 
                     cur.execute("""
                     INSERT OR REPLACE INTO agg_daily_keywords (paper_date, language, category, keyword, distinct_paper_count)
@@ -734,24 +697,6 @@ def reextract_all_keywords(data_dir="data", db_path=None):
                     conn.close()
 
             processed_files_cache.add(filename)
-
-        # 重新刷新全局 IDF 缓存
-        with db_lock:
-            conn = connect_db(target_db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) FROM papers")
-                total_papers = cur.fetchone()[0]
-                keywords.idf_doc_count = total_papers
-                if total_papers > 0:
-                    cur.execute("SELECT keyword, COUNT(DISTINCT paper_id) FROM paper_keywords GROUP BY keyword")
-                    df_rows = cur.fetchall()
-                    keywords.idf_cache = {
-                        row[0].lower(): math.log((1 + total_papers) / (1 + row[1])) + 1
-                        for row in df_rows if row[0]
-                    }
-            finally:
-                conn.close()
 
         try:
             from server_modules.stats import clear_stats_cache

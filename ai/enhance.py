@@ -131,7 +131,8 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         "motivation": "缺失摘要" if missing_abstract else "Motivation analysis unavailable",
         "method": "缺失摘要" if missing_abstract else "Method extraction failed",
         "result": "缺失摘要" if missing_abstract else "Result analysis unavailable",
-        "conclusion": "缺失摘要" if missing_abstract else "Conclusion extraction failed"
+        "conclusion": "缺失摘要" if missing_abstract else "Conclusion extraction failed",
+        "keywords": []
     }
 
     inputs = {
@@ -156,6 +157,11 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         item['AI'] = {**default_ai_fields, **partial_data}
 
     item['AI'].pop('remote_sensing_cross', None)
+    keywords = item['AI'].get('keywords')
+    if isinstance(keywords, list) and not missing_abstract:
+        item['AI']['keywords'] = [kw.strip() for kw in keywords if isinstance(kw, str) and kw.strip()]
+    else:
+        item['AI']['keywords'] = []
 
     # Final validation to ensure all required fields exist
     for field in default_ai_fields.keys():
