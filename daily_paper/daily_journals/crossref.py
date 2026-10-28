@@ -171,12 +171,17 @@ def fetch_crossref_papers(
                         
                         # Extract authors
                         authors = []
+                        affiliations = []
                         for aut in item.get("author", []):
                             given = aut.get("given", "")
                             family = aut.get("family", "")
                             name = f"{given} {family}".strip()
                             if name:
                                 authors.append(name)
+                            for affiliation in aut.get("affiliation") or []:
+                                affiliation_name = (affiliation.get("name") or "").strip()
+                                if affiliation_name and affiliation_name not in affiliations:
+                                    affiliations.append(affiliation_name)
                         if not authors:
                             authors = ["Unknown Author"]
                             
@@ -190,6 +195,7 @@ def fetch_crossref_papers(
                                 "doi": doi_clean,
                                 "title": title,
                                 "authors": authors,
+                                "affiliations": affiliations,
                                 "abstract": abstract
                             }
                 

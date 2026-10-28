@@ -755,6 +755,9 @@ function normalizePaper(paper, date) {
     translated_title: paper.AI && paper.AI.translated_title ? paper.AI.translated_title : '',
     url: paper.url || paper.abs || paper.pdf || `https://arxiv.org/abs/${paper.id}`,
     authors: Array.isArray(paper.authors) ? paper.authors.join(', ') : (paper.authors || ''),
+    affiliations: [...new Set((Array.isArray(paper.affiliations) ? paper.affiliations : [paper.affiliations])
+      .filter(affiliation => typeof affiliation === 'string' && affiliation.trim())
+      .map(affiliation => affiliation.trim()))],
     category: allCategories,
     summary: summary,
     details: rawDetails,
@@ -1208,6 +1211,7 @@ function createPaperCard(paper, globalIndex, clickIndex) {
         ${paper.translated_title && paper.translated_title !== paper.title ? `<div class="paper-title-zh">${escapeHtml(paper.translated_title)}</div>` : ''}
       </h3>
       <p class="paper-card-authors">${formattedAuthors}</p>
+      <p class="paper-card-affiliations">作者机构：${paper.affiliations && paper.affiliations.length > 0 ? escapeHtml(paper.affiliations.join('；')) : '未提供'}</p>
       <div class="paper-card-categories">
         ${categoryTags}
         ${abstractBadge}

@@ -30,8 +30,8 @@ def test_fetch_crossref_papers_success():
             "DOI": "10.1109/TGRS.2026.1234567",
             "title": ["Deep Learning for InSAR Deformation Mapping"],
             "author": [
-                {"given": "San", "family": "Zhang"},
-                {"given": "Si", "family": "Li"}
+                {"given": "San", "family": "Zhang", "affiliation": [{"name": " Wuhan University "}]},
+                {"given": "Si", "family": "Li", "affiliation": [{"name": "Wuhan University"}, {"name": "CAS"}, {"name": ""}]}
             ],
             "abstract": "<jats:p>Sample abstract text here.</jats:p>"
         }
@@ -59,6 +59,7 @@ def test_fetch_crossref_papers_success():
         assert paper["doi"] == "10.1109/tgrs.2026.1234567"
         assert paper["title"] == "Deep Learning for InSAR Deformation Mapping"
         assert paper["authors"] == ["San Zhang", "Si Li"]
+        assert paper["affiliations"] == ["Wuhan University", "CAS"]
         assert paper["abstract"] == "Sample abstract text here."
 
 

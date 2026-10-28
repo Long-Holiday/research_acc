@@ -29,6 +29,19 @@ from daily_journals import (
 )
 
 
+def extract_affiliations(paper):
+    affiliations = []
+    for authorship in paper.get("authorships") or []:
+        names = [institution.get("display_name") for institution in authorship.get("institutions") or []]
+        if not any(names):
+            names = authorship.get("raw_affiliation_strings") or []
+        for name in names:
+            name = (name or "").strip()
+            if name and name not in affiliations:
+                affiliations.append(name)
+    return affiliations
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", type=str, default=None, help="The base date (today) in YYYY-MM-DD format. Yesterday of this date will be queried.")
@@ -121,7 +134,8 @@ def main():
                             authors.append(author_name)
                     if not authors:
                         authors = crossref_item["authors"]
-                        
+                    affiliations = extract_affiliations(paper_detail) or crossref_item.get("affiliations", [])
+
                     # 尝试从 OpenAlex 关联的 arXiv 链接拉取
                     arxiv_link_summary = ""
                     arxiv_url = find_arxiv_url(paper_detail)
@@ -152,7 +166,8 @@ def main():
                     openalex_id = doi.replace("/", "_")
                     title = crossref_item["title"]
                     authors = crossref_item["authors"]
-                    
+                    affiliations = crossref_item.get("affiliations", [])
+
                     summary, source_tag = fetch_comprehensive_abstract(
                         doi=doi,
                         title=title,
@@ -169,6 +184,7 @@ def main():
                     "id": openalex_id,
                     "title": title,
                     "authors": authors,
+                    "affiliations": affiliations,
                     "categories": [journal["category"]],
                     "comment": "",
                     "summary": summary,
@@ -199,7 +215,8 @@ def main():
                         authors.append(author_name)
                 if not authors:
                     authors = ["Unknown Author"]
-                    
+                affiliations = extract_affiliations(paper)
+
                 # 尝试从 OpenAlex 关联的 arXiv 链接拉取
                 arxiv_link_summary = ""
                 arxiv_url = find_arxiv_url(paper)
@@ -226,6 +243,7 @@ def main():
                     "id": openalex_id,
                     "title": title,
                     "authors": authors,
+                    "affiliations": affiliations,
                     "categories": [journal["category"]],
                     "comment": "",
                     "summary": summary,
