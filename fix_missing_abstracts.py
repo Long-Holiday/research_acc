@@ -14,7 +14,7 @@ import json
 import re
 import argparse
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from typing import List, Dict, Tuple, Optional, Set
 from tqdm import tqdm
 
@@ -266,20 +266,39 @@ def enhance_papers_with_ai(
     print(f"🤖 正在为 {len(papers)} 篇修正摘要的论文生成 AI 结构化总结 (模型: {model_name}, 并发: {max_workers})...")
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(process_single_item, chain, dict(p), language): p
-            for p in papers
-        }
-        
-        for future in tqdm(as_completed(futures), total=len(futures), desc="AI 增强进度"):
+        paper_iter = iter(papers)
+        pending = {}
+
+        def submit_next() -> bool:
             try:
-                res = future.result()
-                if res is not None:
-                    enhanced_results.append(res)
-            except Exception as e:
-                p = futures[future]
-                print(f"AI 处理论文 [{p.get('id', '')}] 异常: {e}", file=sys.stderr)
-                
+                paper = next(paper_iter)
+            except StopIteration:
+                return False
+            pending[executor.submit(process_single_item, chain, dict(paper), language)] = paper
+            return True
+
+        with tqdm(total=len(papers), desc="AI 增强进度") as pbar:
+            for _ in range(max_workers):
+                if not submit_next():
+                    break
+
+            while pending:
+                done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                finished = len(done)
+                for future in done:
+                    paper = pending.pop(future)
+                    try:
+                        res = future.result()
+                        if res is not None:
+                            enhanced_results.append(res)
+                    except Exception as e:
+                        print(f"AI 处理论文 [{paper.get('id', '')}] 异常: {e}", file=sys.stderr)
+                    finally:
+                        pbar.update(1)
+                done.clear()
+                for _ in range(finished):
+                    submit_next()
+
     return enhanced_results
 
 
@@ -549,19 +568,21 @@ def main():
             update_enhanced_file(enhanced_filepath, enhanced_papers)
 
             # 数据库同步使用摘要修复后的完整集合，AI 结果存在时优先使用 AI 结果。
-            enhanced_by_id = {
-                str(p.get("id", "")).strip().lower(): p
-                for p in enhanced_papers
-                if p.get("id")
-            }
-            sync_papers = [
-                enhanced_by_id.get(str(p.get("id", "")).strip().lower(), p)
-                for p in file_rescued_items
-                if p.get("id")
-            ]
-            if sync_papers:
-                keyword_sync_groups.append((date_str, language, sync_papers))
-        else:
+            # --skip-db-sync 时无需构造仅供同步使用的索引与列表。
+            if not args.skip_db_sync:
+                enhanced_by_id = {
+                    str(p.get("id", "")).strip().lower(): p
+                    for p in enhanced_papers
+                    if p.get("id")
+                }
+                sync_papers = [
+                    enhanced_by_id.get(str(p.get("id", "")).strip().lower(), p)
+                    for p in file_rescued_items
+                    if p.get("id")
+                ]
+                if sync_papers:
+                    keyword_sync_groups.append((date_str, language, sync_papers))
+        elif not args.skip_db_sync:
             keyword_sync_groups.append((date_str, language, file_rescued_items))
 
     # 4. 统计数据库同步

@@ -1720,6 +1720,7 @@ async function loadMorePapers() {
       dataUrl = DATA_CONFIG.getPapersUrl(currentDate, selectedLanguage, nextPage, pageSize, currentCategory);
     }
 
+    dataUrl += '&include_category_counts=false';
     const response = await Auth.fetchWithAuth(dataUrl);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);

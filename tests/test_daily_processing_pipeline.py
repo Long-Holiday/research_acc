@@ -1,3 +1,4 @@
+import fcntl
 import os
 from pathlib import Path
 import shutil
@@ -12,6 +13,7 @@ import pytest
 def test_daily_processing_runs_once_after_enhancement(tmp_path, enhance_exit, process_exit, partial):
     root = Path(__file__).resolve().parents[1]
     shutil.copyfile(root / "run.sh", tmp_path / "run.sh")
+    shutil.copyfile(root / "task_lock.sh", tmp_path / "task_lock.sh")
     for folder in ("bin", "data", "daily_paper", "ai"):
         (tmp_path / folder).mkdir()
     stub_python = tmp_path / "bin/python"
@@ -60,6 +62,7 @@ printf '{"id":"paper"}\\n' > "$4"
 def test_weekend_pipeline_defers_database_sync(tmp_path):
     root = Path(__file__).resolve().parents[1]
     shutil.copyfile(root / "run_fix_abstracts.sh", tmp_path / "run_fix_abstracts.sh")
+    shutil.copyfile(root / "task_lock.sh", tmp_path / "task_lock.sh")
     executable = tmp_path / ".venv/bin/python"
     executable.parent.mkdir(parents=True)
     executable.write_text('#!/bin/bash\nprintf \'%s\\n\' "$*" >> "$TRACE_FILE"\n')
@@ -74,3 +77,61 @@ def test_weekend_pipeline_defers_database_sync(tmp_path):
     assert commands[1].startswith("fix_missing_abstracts.py")
     assert all("--skip-db-sync" in command for command in commands)
     assert not any("maintenance.py" in command for command in commands)
+
+
+@pytest.mark.parametrize("script,args", [
+    ("run.sh", []),
+    ("run_fix_abstracts.sh", []),
+    ("run_maintenance.sh", ["data-process"]),
+    ("run_maintenance.sh", ["keywords-reextract"]),
+    ("run_maintenance.sh", ["advisor-backfill"]),
+    ("run_maintenance.sh", ["advisor-regenerate", "--date", "2026-10-12"]),
+])
+def test_background_entrypoints_refuse_overlap(tmp_path, script, args):
+    root = Path(__file__).resolve().parents[1]
+    for filename in (script, "task_lock.sh"):
+        shutil.copyfile(root / filename, tmp_path / filename)
+    with (tmp_path / ".maintenance.lock").open("w") as held_lock:
+        fcntl.flock(held_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = subprocess.run(
+            ["bash", str(tmp_path / script), *args], cwd=tmp_path.parent,
+            capture_output=True, text=True, timeout=10,
+        )
+    assert result.returncode == 75
+    assert "已有后台任务正在运行" in result.stderr
+    assert result.stdout == ""
+
+
+def test_background_lock_is_released_and_inherited_by_child(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    shutil.copyfile(root / "task_lock.sh", tmp_path / "task_lock.sh")
+    command = '''
+PROJECT_DIR="$PWD"
+source ./task_lock.sh
+acquire_task_lock || exit $?
+bash -c 'flock -n -E 75 "$PWD/.maintenance.lock" true'
+'''
+    for _ in range(2):
+        result = subprocess.run(["bash", "-c", command], cwd=tmp_path, timeout=10)
+        assert result.returncode == 75
+    with (tmp_path / ".maintenance.lock").open("w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_log_cleanup_does_not_wait_for_background_lock(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    for filename in ("run_maintenance.sh", "task_lock.sh"):
+        shutil.copyfile(root / filename, tmp_path / filename)
+    executable = tmp_path / "bin/uv"
+    executable.parent.mkdir()
+    executable.write_text('#!/bin/bash\nprintf "%s\\n" "$*"\n')
+    executable.chmod(0o755)
+    with (tmp_path / ".maintenance.lock").open("w") as held_lock:
+        fcntl.flock(held_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = subprocess.run(
+            ["bash", "run_maintenance.sh", "logs-cleanup", "--dry-run"], cwd=tmp_path,
+            env={**os.environ, "PATH": f"{executable.parent}:{os.environ['PATH']}"},
+            capture_output=True, text=True, timeout=10,
+        )
+    assert result.returncode == 0, result.stderr
+    assert "logs-cleanup --dry-run" in result.stdout

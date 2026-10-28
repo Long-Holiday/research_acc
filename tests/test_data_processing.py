@@ -127,6 +127,35 @@ def test_cross_date_dedup_and_new_history(processing_env):
     ]
 
 
+def test_duplicates_are_skipped_before_nlp_with_bounded_history_queries(processing_env):
+    data_dir, db_path = processing_env
+    write_papers(data_dir, date="2026-10-11", ids=("shared",))
+    processor.scan_and_process_files(data_dir, db_path)
+    write_papers(data_dir, ids=("shared", "unique", "unique", *[f"new-{i}" for i in range(60)], "unique"))
+    extracted_ids = []
+    statements = []
+    conn = sqlite3.connect(db_path)
+    conn.set_trace_callback(statements.append)
+
+    def extract(items, batch_size=50):
+        extracted_ids.extend(str(paper["id"]) for paper in items)
+        return [[("keyword", 1)] for _ in items]
+
+    with patch.object(processor, "connect_db", return_value=conn), patch.object(
+        processor.keywords, "extract_keywords_batch", side_effect=extract,
+    ):
+        assert processor.scan_and_process_files(data_dir, db_path) == 1
+
+    assert len(extracted_ids) == 61
+    assert len(set(extracted_ids)) == 61
+    assert "shared" not in extracted_ids
+    history_queries = [sql for sql in statements if "SELECT DISTINCT paper_id FROM papers" in sql]
+    assert len(history_queries) == 2
+    assert all("paper_id IN (" in sql for sql in history_queries)
+    assert not any("SELECT paper_id FROM papers WHERE language" in sql for sql in statements)
+    assert len(rows(db_path, "papers")) == 62
+
+
 def test_data_process_cli_uses_custom_paths(processing_env, capsys):
     data_dir, db_path = processing_env
     write_papers(data_dir)

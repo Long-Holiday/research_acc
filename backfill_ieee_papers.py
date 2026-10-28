@@ -15,7 +15,7 @@ import json
 import re
 import argparse
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from typing import List, Dict, Set, Optional, Tuple
 from tqdm import tqdm
 
@@ -509,19 +509,38 @@ def enhance_papers_with_ai(
     print(f"正在对 {len(papers)} 篇补录论文进行 AI 增强处理 (模型: {model_name}, 线程数: {max_workers})...")
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(process_single_item, chain, dict(paper), language)
-            for paper in papers
-        ]
-        
-        for future in tqdm(as_completed(futures), total=len(futures), desc="AI 增强进度"):
+        pending = set()
+        paper_iter = iter(papers)
+
+        def submit_next() -> bool:
             try:
-                res = future.result()
-                if res is not None:
-                    enhanced_results.append(res)
-            except Exception as e:
-                print(f"AI 处理单篇论文异常: {e}", file=sys.stderr)
-                
+                paper = next(paper_iter)
+            except StopIteration:
+                return False
+            pending.add(executor.submit(process_single_item, chain, dict(paper), language))
+            return True
+
+        with tqdm(total=len(papers), desc="AI 增强进度") as pbar:
+            for _ in range(max_workers):
+                if not submit_next():
+                    break
+
+            while pending:
+                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                finished = len(done)
+                for future in done:
+                    try:
+                        res = future.result()
+                        if res is not None:
+                            enhanced_results.append(res)
+                    except Exception as e:
+                        print(f"AI 处理单篇论文异常: {e}", file=sys.stderr)
+                    finally:
+                        pbar.update(1)
+                done.clear()
+                for _ in range(finished):
+                    submit_next()
+
     return enhanced_results
 
 
@@ -675,7 +694,8 @@ def main():
             enh_rep, enh_app = upsert_jsonl_file(enhanced_file, enhanced_items)
             print(f"🤖 AI 增强文件 {enhanced_file}: 替换更新 {enh_rep} 篇，新增追加 {enh_app} 篇")
             total_backfilled_ai += (enh_rep + enh_app)
-            keyword_sync_groups.append((date_str, language, enhanced_items))
+            if not args.skip_db_sync:
+                keyword_sync_groups.append((date_str, language, enhanced_items))
 
     # 4. 同步数据库
     if keyword_sync_groups and not args.dry_run and not args.skip_db_sync:

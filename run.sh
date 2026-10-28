@@ -4,6 +4,11 @@
 # 主要工作流由系统级 cron 调度或本地手动执行
 # Main workflow is scheduled by system-level cron or executed locally
 
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_DIR" || exit 1
+source "$PROJECT_DIR/task_lock.sh" || exit 1
+acquire_task_lock || exit $?
+
 # 将科学计算库限制为单线程，降低每日处理的资源峰值。
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1

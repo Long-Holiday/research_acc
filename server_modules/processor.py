@@ -210,16 +210,6 @@ def scan_and_process_files(data_dir="data", db_path=None):
                     for table in ("papers", "paper_keywords", "keyword_stats", "agg_daily_papers", "agg_daily_keywords"):
                         cursor.execute(f"DELETE FROM {table} WHERE paper_date = ? AND language = ?", (paper_date, lang))
 
-                    # --- 全局跨日期去重：加载同 language 下其他日期已存在的 paper_id 集合 ---
-                    # 防止不同日期的 AI 增强文件包含同一期刊论文时重复入库
-                    existing_global_ids = set()
-                    try:
-                        cursor.execute("SELECT paper_id FROM papers WHERE language = ? AND paper_date != ?", (lang, paper_date))
-                        for (pid,) in cursor.fetchall():
-                            if pid:
-                                existing_global_ids.add(str(pid))
-                    except Exception:
-                        existing_global_ids = set()
                     seen_in_file = set()
                         
                     filepath = os.path.join(db_dir, filename)
@@ -270,22 +260,30 @@ def scan_and_process_files(data_dir="data", db_path=None):
                         if not batch_items:
                             return
                             
-                        # 1. 批量提取关键词
-                        batch_kws = keywords.extract_keywords_batch(batch_items, batch_size=BATCH_NLP_SIZE)
-                            
-                        for paper_item, keywords_with_freq in zip(batch_items, batch_kws):
-                            paper_id = paper_item.get("id")
-                            if not paper_id:
-                                continue
-                            paper_id_str = str(paper_id)
-                            # 同文件内去重
-                            if paper_id_str in seen_in_file:
-                                continue
-                            # 跨日期全局去重（同 language 下 paper_id 在其他日期已存在则跳过）
-                            if paper_id_str in existing_global_ids:
+                        # 只查当前批次的历史 ID，避免加载同语言全部历史论文。
+                        paper_ids = [str(paper["id"]) for paper in batch_items]
+                        placeholders = ",".join("?" for _ in paper_ids)
+                        cursor.execute(
+                            f"SELECT DISTINCT paper_id FROM papers WHERE paper_id IN ({placeholders}) "
+                            "AND language = ? AND paper_date != ?",
+                            (*paper_ids, lang, paper_date),
+                        )
+                        existing_ids = {row[0] for row in cursor}
+                        unique_items = []
+                        for paper in batch_items:
+                            paper_id_str = str(paper["id"])
+                            if paper_id_str in seen_in_file or paper_id_str in existing_ids:
                                 continue
                             seen_in_file.add(paper_id_str)
-                            existing_global_ids.add(paper_id_str)
+                            unique_items.append(paper)
+                        if not unique_items:
+                            return
+
+                        batch_kws = keywords.extract_keywords_batch(unique_items, batch_size=BATCH_NLP_SIZE)
+
+                        for paper_item, keywords_with_freq in zip(unique_items, batch_kws):
+                            paper_id = paper_item["id"]
+                            paper_id_str = str(paper_id)
                                 
                             # 保证最新 paper_json 始终写入 papers 表
                             papers_buf.append((paper_id_str, paper_date, lang, json.dumps(paper_item)))

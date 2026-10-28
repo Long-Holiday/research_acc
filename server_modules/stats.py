@@ -2,6 +2,7 @@ import os
 import re
 import json
 import math
+import threading
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from app.auth import verify_token
@@ -145,8 +146,34 @@ import sys
 import time
 IS_TESTING = "pytest" in sys.modules or "unittest" in sys.modules
 
-# 服务端统计结果内存缓存 (TTL 300秒)
+# 服务端统计结果内存缓存 (TTL 300秒，最多 128 项)
+STATS_CACHE_TTL = 300
+STATS_CACHE_MAX_ENTRIES = 128
 stats_cache = {}
+_stats_cache_lock = threading.Lock()
+
+
+def _purge_expired_stats_cache(now):
+    for key, (_, expires_at) in list(stats_cache.items()):
+        if now >= expires_at:
+            stats_cache.pop(key, None)
+
+
+def _get_cached_stats(key):
+    now = time.time()
+    with _stats_cache_lock:
+        _purge_expired_stats_cache(now)
+        entry = stats_cache.get(key)
+        return entry[0] if entry is not None else None
+
+
+def _set_cached_stats(key, value):
+    now = time.time()
+    with _stats_cache_lock:
+        _purge_expired_stats_cache(now)
+        if key not in stats_cache and len(stats_cache) >= STATS_CACHE_MAX_ENTRIES:
+            stats_cache.pop(next(iter(stats_cache)))
+        stats_cache[key] = (value, now + STATS_CACHE_TTL)
 
 
 def _calculate_keyword_trend(date_distribution, total_papers_map):
@@ -227,7 +254,8 @@ def _calculate_keyword_trend(date_distribution, total_papers_map):
     }
 
 def clear_stats_cache():
-    stats_cache.clear()
+    with _stats_cache_lock:
+        stats_cache.clear()
 
 def get_db_path():
     if config.DB_PATH != "data/statistics.db":
@@ -252,10 +280,10 @@ def get_categories_stats(
         return {"categories": [], "category_counts": {}, "total_all": 0}
         
     cache_key = f"cat_{start_date}_{end_date}_{lang}"
-    if not IS_TESTING and cache_key in stats_cache:
-        res, exp = stats_cache[cache_key]
-        if time.time() < exp:
-            return res
+    if not IS_TESTING:
+        cached = _get_cached_stats(cache_key)
+        if cached is not None:
+            return cached
             
     conn = connect_db(db_path)
     try:
@@ -282,7 +310,7 @@ def get_categories_stats(
             "total_all": total_all
         }
         if not IS_TESTING:
-            stats_cache[cache_key] = (result, time.time() + 300)
+            _set_cached_stats(cache_key, result)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch category stats: {str(e)}")
@@ -302,15 +330,15 @@ def get_keyword_stats(
         return {"keywords": [], "daily_trends": []}
         
     cache_key = f"kw_{start_date}_{end_date}_{lang}_{category}"
-    if not IS_TESTING and cache_key in stats_cache:
-        res, exp = stats_cache[cache_key]
-        if time.time() < exp:
-            return res
+    if not IS_TESTING:
+        cached = _get_cached_stats(cache_key)
+        if cached is not None:
+            return cached
         
     try:
         result = query_keyword_stats(db_path, start_date, end_date, lang, category)
         if not IS_TESTING:
-            stats_cache[cache_key] = (result, time.time() + 300)
+            _set_cached_stats(cache_key, result)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
@@ -383,17 +411,20 @@ def query_keyword_stats(db_path, start_date, end_date, lang="en", category="All"
             entry["category_distribution"][cat] = entry["category_distribution"].get(cat, 0) + count
             entry["date_distribution"][p_date] = entry["date_distribution"].get(p_date, 0) + count
 
-        # 3. Calculate volume-normalised metrics and confidence-adjusted trends
+        # 3. Calculate volume-normalised metrics
         for kw, entry in keyword_data.items():
             if total_papers_in_period > 0:
                 entry["rate"] = round((entry["count"] / total_papers_in_period) * 100, 2)
             else:
                 entry["rate"] = 0.0
-                
-            entry.update(_calculate_keyword_trend(entry["date_distribution"], total_papers_map))
 
         # Convert to list and sort by count descending
         keywords_list = sorted(keyword_data.values(), key=lambda x: x["count"], reverse=True)[:100]
+
+        # Only the keywords returned to the caller need trend metrics.
+        for entry in keywords_list:
+            entry.update(_calculate_keyword_trend(entry["date_distribution"], total_papers_map))
+
         top_keywords = {item["keyword"] for item in keywords_list}
 
         # Build daily trends
@@ -434,10 +465,10 @@ def get_network_stats(
         return {"nodes": [], "links": []}
         
     cache_key = f"net_{start_date}_{end_date}_{lang}_{category}_{exclude}"
-    if not IS_TESTING and cache_key in stats_cache:
-        res, exp = stats_cache[cache_key]
-        if time.time() < exp:
-            return res
+    if not IS_TESTING:
+        cached = _get_cached_stats(cache_key)
+        if cached is not None:
+            return cached
         
     conn = connect_db(db_path)
     try:
@@ -569,7 +600,7 @@ def get_network_stats(
             "links": links
         }
         if not IS_TESTING:
-            stats_cache[cache_key] = (result, time.time() + 300)
+            _set_cached_stats(cache_key, result)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")

@@ -41,3 +41,4 @@ cron_crawl.log
 cron_fix_abstracts.log
 cron_log_cleanup.log
 .server.pid
+.maintenance.lock

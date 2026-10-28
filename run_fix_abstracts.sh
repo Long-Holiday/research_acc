@@ -7,8 +7,13 @@
 # 1. Backfill missing papers for all journals published 15-30 days ago
 # 2. Detect & fix missing abstracts; defer database processing to the daily pipeline
 
-cd "$(dirname "$0")"
-PROJECT_DIR="$(pwd)"
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_DIR" || exit 1
+source "$PROJECT_DIR/task_lock.sh" || exit 1
+acquire_task_lock || exit $?
+
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 
 # 加载 .env 配置文件
 if [ -f .env ]; then

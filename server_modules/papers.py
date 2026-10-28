@@ -27,11 +27,14 @@ def get_db_path():
     return getattr(processor, "DB_PATH", config.DB_PATH)
 
 
-def _empty_page(page, page_size):
-    return {
+def _empty_page(page, page_size, include_category_counts=True):
+    result = {
         "items": [], "total": 0, "page": page, "page_size": page_size,
-        "total_pages": 1, "category_counts": {}, "categories": [], "total_all": 0,
+        "total_pages": 1,
     }
+    if include_category_counts:
+        result.update({"category_counts": {}, "categories": [], "total_all": 0})
+    return result
 
 
 def _date_processed(cursor, date, lang):
@@ -42,12 +45,12 @@ def _date_processed(cursor, date, lang):
     return cursor.fetchone() is not None
 
 
-def query_papers(start_date, end_date, lang, page, page_size, category, keyword, author, single_date=False):
+def query_papers(start_date, end_date, lang, page, page_size, category, keyword, author, single_date=False, include_category_counts=True):
     db_path = get_db_path()
     if not os.path.exists(db_path):
         if single_date:
             raise HTTPException(status_code=404, detail="Papers not found for this date and language")
-        return [] if page is None else _empty_page(page, page_size)
+        return [] if page is None else _empty_page(page, page_size, include_category_counts)
 
     conn = connect_db(db_path)
     try:
@@ -58,7 +61,7 @@ def query_papers(start_date, end_date, lang, page, page_size, category, keyword,
         if cursor.fetchone() is None:
             if single_date:
                 raise HTTPException(status_code=404, detail="Papers not found for this date and language")
-            return [] if page is None else _empty_page(page, page_size)
+            return [] if page is None else _empty_page(page, page_size, include_category_counts)
 
         # 三次只读查询共享快照，避免离线批处理提交期间计数与页数据不一致。
         conn.execute("BEGIN")
@@ -82,16 +85,24 @@ def query_papers(start_date, end_date, lang, page, page_size, category, keyword,
                 raise HTTPException(status_code=404, detail="Papers not found for this date and language")
             return items
 
-        cursor.execute(
-            f"SELECT {PRIMARY_CATEGORY} AS category, COUNT(*) FROM papers p "
-            f"WHERE {base_where} GROUP BY category ORDER BY category",
-            base_params,
-        )
-        category_counts = dict(cursor.fetchall())
-        total_all = sum(category_counts.values())
-        if single_date and not total_all:
+        category_counts = {}
+        total_all = 0
+        if include_category_counts:
+            cursor.execute(
+                f"SELECT {PRIMARY_CATEGORY} AS category, COUNT(*) FROM papers p "
+                f"WHERE {base_where} GROUP BY category ORDER BY category",
+                base_params,
+            )
+            category_counts = dict(cursor.fetchall())
+            total_all = sum(category_counts.values())
+        if single_date:
+            if include_category_counts:
+                date_has_papers = total_all > 0
+            else:
+                cursor.execute(f"SELECT 1 FROM papers p WHERE {base_where} LIMIT 1", base_params)
+                date_has_papers = cursor.fetchone() is not None
             # 已入库的空文件是有效日期，与不存在的数据区分。
-            if not _date_processed(cursor, start_date, lang):
+            if not date_has_papers and not _date_processed(cursor, start_date, lang):
                 raise HTTPException(status_code=404, detail="Papers not found for this date and language")
 
         filters = [base_where]
@@ -138,12 +149,16 @@ def query_papers(start_date, end_date, lang, page, page_size, category, keyword,
             if not single_date:
                 paper['date'] = paper_date
             items.append(paper)
-        return {
+        result = {
             "items": items, "total": total, "page": page, "page_size": page_size,
             "total_pages": max(1, math.ceil(total / page_size)),
-            "category_counts": category_counts, "categories": sorted(category_counts),
-            "total_all": total_all,
         }
+        if include_category_counts:
+            result.update({
+                "category_counts": category_counts, "categories": sorted(category_counts),
+                "total_all": total_all,
+            })
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -185,11 +200,13 @@ def get_papers(
     category: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
+    include_category_counts: bool = Query(True),
     token: str = Depends(verify_token),
 ):
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or not re.fullmatch(r"[a-zA-Z]+", lang):
         raise HTTPException(status_code=400, detail="Invalid date or language format")
-    return query_papers(date, date, lang, page, page_size or 21, category, keyword, author, single_date=True)
+    return query_papers(date, date, lang, page, page_size or 21, category, keyword, author,
+                        single_date=True, include_category_counts=include_category_counts)
 
 
 @router.get("/api/papers/range")
@@ -202,10 +219,12 @@ def get_papers_range(
     category: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
+    include_category_counts: bool = Query(True),
     token: str = Depends(verify_token),
 ):
     if (not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_date)
             or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", end_date)
             or not re.fullmatch(r"[a-zA-Z]+", lang)):
         raise HTTPException(status_code=400, detail="Invalid date or language format")
-    return query_papers(start_date, end_date, lang, page, page_size or 21, category, keyword, author)
+    return query_papers(start_date, end_date, lang, page, page_size or 21, category, keyword, author,
+                        include_category_counts=include_category_counts)

@@ -121,7 +121,7 @@ check_cron_status() {
 # 检查 uv 命令是否存在
 # Check if uv command exists
 if command -v uv >/dev/null 2>&1; then
-    RUN_CMD="uv run uvicorn server:app --host $HOST --port $PORT"
+    RUN_CMD="uv run --no-sync uvicorn server:app --host $HOST --port $PORT"
 else
     # 尝试激活虚拟环境或直接使用 uvicorn
     # Try to activate virtual env or use uvicorn directly
@@ -176,9 +176,6 @@ install_dependencies() {
 }
 
 start() {
-    # 启动前先检查并安装依赖和模型
-    install_dependencies
-
     # 检查是否已经在运行
     if [ -f "$PID_FILE" ]; then
         PID=$(cat "$PID_FILE")
@@ -268,6 +265,9 @@ restart() {
 }
 
 case "$1" in
+    install)
+        install_dependencies
+        ;;
     start)
         start
         ;;

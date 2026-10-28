@@ -121,6 +121,45 @@ def test_sql_limit_and_only_page_json_is_decoded(paper_db, single_date):
     assert any("GROUP BY" in sql for sql in statements)
 
 
+@pytest.mark.parametrize("single_date", [False, True])
+def test_loading_more_skips_category_aggregation(paper_db, single_date):
+    expected = papers.query_papers(
+        "2026-10-12", "2026-10-12", "Chinese", 2, 1, "cs.AI", None, None, single_date,
+    )
+    conn = sqlite3.connect(paper_db)
+    statements = []
+    conn.set_trace_callback(statements.append)
+    with patch.object(papers, "connect_db", return_value=conn):
+        result = papers.query_papers(
+            "2026-10-12", "2026-10-12", "Chinese", 2, 1, "cs.AI", None, None,
+            single_date, include_category_counts=False,
+        )
+    assert result == {key: value for key, value in expected.items()
+                      if key not in ("category_counts", "categories", "total_all")}
+    assert not any("GROUP BY" in sql for sql in statements)
+    assert any("LIMIT 1 OFFSET 1" in sql for sql in statements)
+
+
+@pytest.mark.parametrize("range_mode", [False, True])
+def test_category_counts_can_be_omitted_via_api(paper_db, range_mode):
+    client = TestClient(server.app)
+    if range_mode:
+        url = "/api/papers/range"
+        scope = {"start_date": "2026-10-12", "end_date": "2026-10-12"}
+    else:
+        url = "/api/papers"
+        scope = {"date": "2026-10-12"}
+    response = client.get(url, params={**scope, "lang": "Chinese", "page": 2,
+                                      "page_size": 1, "include_category_counts": "false"})
+    assert response.status_code == 200
+    assert response.json()["total"] == 3
+    assert "category_counts" not in response.json()
+    if not range_mode:
+        response = client.get(url, params={"date": "2026-10-13", "lang": "Chinese",
+                                          "page": 2, "include_category_counts": "false"})
+        assert response.status_code == 404
+
+
 def test_missing_database_returns_no_data_without_scanning(tmp_path, monkeypatch):
     path = tmp_path / "missing.db"
     monkeypatch.setattr(server, "DB_PATH", str(path), raising=False)
@@ -132,6 +171,14 @@ def test_missing_database_returns_no_data_without_scanning(tmp_path, monkeypatch
         response = client.get("/api/papers/range?start_date=2026-10-12&end_date=2026-10-12&lang=Chinese&page=1")
         assert response.status_code == 200
         assert response.json()["items"] == []
+    assert not path.exists()
+    response = client.get(
+        "/api/papers/range?start_date=2026-10-12&end_date=2026-10-12&lang=Chinese"
+        "&page=2&include_category_counts=false",
+    )
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+    assert "category_counts" not in response.json()
     assert not path.exists()
 
 
